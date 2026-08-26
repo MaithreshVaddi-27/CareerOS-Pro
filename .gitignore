@@ -12,6 +12,23 @@ venv.bak/
 # Docker
 .docker/
 
+# Frontend (Vite/React) — node_modules was previously being zipped/committed,
+# bloating the repo by tens of thousands of files for no reason
+frontend/node_modules/
+node_modules/
+frontend/dist/
+dist/
+frontend/.vite/
+.vite/
+npm-debug.log*
+yarn-error.log*
+frontend/.env
+frontend/.env.local
+
+# Zip/export artifacts (macOS Archive Utility resource forks)
+__MACOSX/
+*.zip
+
 # Python / General
 __pycache__/
 *.py[cod]

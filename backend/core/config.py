@@ -1,8 +1,9 @@
 """Env-driven config. No secrets hard-coded. Per spec section 51/52."""
 
 from functools import lru_cache
+from typing import List
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List, Dict
 
 # RawJobPosting imported via schemas - removed unused import
 
@@ -14,7 +15,8 @@ class Settings(BaseSettings):
     mysql_port: int = 3306
     mysql_database: str = "careeros"
     mysql_user: str = "careeros"
-    mysql_password: str = ""
+    # mysql_password: str must be explicitly set - no default for security
+    mysql_password: str
 
     database_url: str = ""
 
@@ -25,7 +27,7 @@ class Settings(BaseSettings):
     adzuna_app_key: str = ""
     adzuna_country: str = "in"  # gb, us, in, etc — see Adzuna docs for supported codes
 
-    job_sources: str = "jsearch,adzuna,remotive,remoteok,arbeitnow"  # comma-separated, used when job_api_mode=live
+    job_sources: str = "jsearch,adzuna,remotive,remoteok,arbeitnow,company"  # comma-separated, used when job_api_mode=live
 
     gemini_api_key: str = ""
     gemini_model: str = "gemini-flash-latest"  # alias, auto-follows Google rollouts — never pin exact version
@@ -43,8 +45,19 @@ class Settings(BaseSettings):
 
     firecrawl_api_key: str = ""
 
-    api_key: str = ""  # set to require X-API-Key header on all endpoints; empty = open (dev default)
+    # api_key: str must be explicitly set to enable API key protection - empty = open (INSECURE)
+    api_key: str
     rate_limit_per_minute: int = 60
+
+    # Comma-separated list of allowed CORS origins. Defaults cover local dev
+    # (Vite on 5173, CRA-style on 3000) so nothing breaks out of the box —
+    # override in production with your real frontend origin(s), e.g.
+    # ALLOWED_ORIGINS=https://app.careeros.example
+    allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000"
+
+    @property
+    def allowed_origins_list(self) -> List[str]:
+        return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
 
     gradio_username: str = ""
     gradio_password: str = ""

@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import SegmentedControl from '../ui/SegmentedControl';
+import { formatLabel } from '../../utils/format';
 
 /**
  * Filters — permanently visible advanced filters.
@@ -11,8 +12,17 @@ const REMOTE_OPTS = [
   { value: 'onsite', label: 'On-site' },
 ];
 
-// Custom order for experience levels (removed duplicate 'Any', re-ordered in descending order)
-const EXP_LEVELS = ['Senior', 'Mid', 'Entry', 'Fresher', 'Intern', 'Any'];
+// value = backend experience_level string (must match services/normalize.py exactly,
+// not just a lowercased label — that was silently breaking the Full-time/Part-time filter, see EMP_TYPES below)
+const EXP_LEVELS = [
+  { value: '', label: 'Any' },
+  { value: 'senior', label: 'Senior' },
+  { value: 'mid', label: 'Mid' },
+  { value: 'entry', label: 'Entry' },
+  { value: 'no_experience', label: 'No experience' },
+  { value: 'fresher', label: 'Fresher' },
+  { value: 'intern', label: 'Intern' },
+];
 
 // Custom order for posted within (more recent first)
 const POSTED = [
@@ -24,8 +34,19 @@ const POSTED = [
   { value: '30', label: 'Last month' },
 ];
 
-const EMP_TYPES = ['Full-time', 'Part-time', 'Internship', 'Contract', 'Temporary'];
-const SOURCES = ['jsearch', 'adzuna', 'remotive', 'remoteok', 'arbeitnow'];
+// value = backend employment_type string (must match services/normalize.py _EMPLOYMENT_MAP output —
+// sending the raw label 'Full-time' to the API never matched stored 'full_time' rows, filter was dead)
+const EMP_TYPES = [
+  { value: 'full_time', label: 'Full-time' },
+  { value: 'part_time', label: 'Part-time' },
+  { value: 'internship', label: 'Internship' },
+  { value: 'contract', label: 'Contract' },
+  { value: 'temporary', label: 'Temporary' },
+];
+// value must match the Job.source string actually stored in the DB —
+// company scraper stores 'company_scraper' (see services/company_scraper.py),
+// not 'company'. Using the wrong value here silently filters out every result.
+const SOURCES = ['jsearch', 'adzuna', 'remotive', 'remoteok', 'arbeitnow', 'company_scraper'];
 
 export default function Filters({ filters, onChange }) {
   const set = (patch) => onChange({ ...filters, ...patch });
@@ -51,12 +72,11 @@ export default function Filters({ filters, onChange }) {
                           set({ sources: active ? list.filter((s) => s !== src) : [...list, src] });
                         }}
                         className={`btn btn-sm ${active ? 'btn-primary' : 'btn-secondary'}`}
-                        style={{ textTransform: 'capitalize' }}
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.96 }}
                         transition={{ type: 'spring', bounce: 0, duration: 0.2 }}
                       >
-                        {src}
+                        {formatLabel(src)}
                       </motion.button>
                     );
                   })}
@@ -66,7 +86,7 @@ export default function Filters({ filters, onChange }) {
               {/* Employment type */}
               <FilterRow label="Employment type">
                 <SegmentedControl
-                  options={[{ value: '', label: 'Any' }, ...EMP_TYPES.map((t) => ({ value: t, label: t }))]}
+                  options={[{ value: '', label: 'Any' }, ...EMP_TYPES]}
                   value={filters.employment_type || ''}
                   onChange={(v) => set({ employment_type: v })}
                   ariaLabel="Employment type"
@@ -86,7 +106,7 @@ export default function Filters({ filters, onChange }) {
               {/* Experience level */}
               <FilterRow label="Experience">
                 <SegmentedControl
-                  options={EXP_LEVELS.map((lvl) => ({ value: lvl, label: lvl }))}
+                  options={EXP_LEVELS}
                   value={filters.experience_level || ''}
                   onChange={(v) => set({ experience_level: v })}
                   ariaLabel="Experience level"

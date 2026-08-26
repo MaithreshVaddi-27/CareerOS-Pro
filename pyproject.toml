@@ -5,7 +5,7 @@ description = "CareerOS — job discovery, matching, and verification pipeline"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
-    "granian>=1.5",
+    "uvicorn[standard]>=0.30.0",
     "beautifulsoup4>=4.12",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
@@ -27,12 +27,25 @@ dependencies = [
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
 [project.scripts]
-careeros-api = "run:main"
+careeros-api = "backend.run:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-py-modules = ["run"]
-packages = ["app", "app.services"]
+[tool.setuptools.packages.find]
+include = ["backend*"]
+
+[tool.ruff]
+line-length = 120
+exclude = ["frontend", "node_modules"]
+
+[tool.ruff.lint]
+# Meaningful baseline: real bugs (F = pyflakes: unused imports/vars, undefined
+# names) and basic style consistency (E4/E7/E9, I = import sorting). Left off
+# the pedantic/preview rule families (UP pyupgrade syntax modernization,
+# BLE001 blind-except, S security-lint, SIM simplify) — this codebase uses
+# broad `except Exception` deliberately in several places (provider fallback
+# chains, per-job insert isolation) and those rules would flag intentional
+# design, not bugs. Revisit and tighten per-rule as the codebase matures.
+select = ["E4", "E7", "E9", "F", "I"]

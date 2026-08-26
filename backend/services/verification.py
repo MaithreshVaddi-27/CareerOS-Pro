@@ -9,7 +9,8 @@ verified stays False, not True (spec 2.3: unknown/false, never guessed).
 
 import httpx
 from pydantic import BaseModel, ValidationError
-from backend.config import get_settings
+
+from backend.core.config import get_settings
 
 settings = get_settings()
 
@@ -84,7 +85,10 @@ async def _firecrawl_scrape(url: str) -> FirecrawlResponse | None:
         resp = await client.post(FIRECRAWL_SCRAPE_URL, headers=headers, json=payload)
         resp.raise_for_status()
         return FirecrawlResponse.model_validate(resp.json())
-    except (httpx.HTTPError, ValidationError):
+    except (httpx.HTTPError, ValidationError) as e:
+        # Log the exception for debugging
+        import logging
+        logging.getLogger("careeros").debug(f"Firecrawl scrape failed: {e}")
         return None
 
 

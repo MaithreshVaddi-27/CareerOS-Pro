@@ -6,17 +6,22 @@ Company career page scraper is a secondary source that complements API coverage
 with deterministic dedup — duplicates are automatically collapsed by url_hash.
 """
 
-import httpx
-import logging
-import re
 import asyncio
+import logging
+import random
+import re
+import time
 from typing import Protocol
-from backend.config import get_settings
-from backend.schemas import RawJobPosting
-from backend.services.company_scraper import scrape_company_jobs, hash_url
 
-settings = get_settings()
+import httpx
+
+from backend.core.config import get_settings
+from backend.core.monitoring import agent_monitor
+from backend.schemas import RawJobPosting
+from backend.services.company_scraper import scrape_company_jobs
+
 logger = logging.getLogger("careeros")
+settings = get_settings()
 
 # Use v2 endpoint per RapidAPI JSearch documentation
 # NOTE: Requires active RapidAPI subscription (free tier ~200 req/month)
@@ -33,6 +38,32 @@ def get_http_client() -> httpx.AsyncClient:
     if _http_client is None:
         _http_client = httpx.AsyncClient(timeout=15.0)
     return _http_client
+
+
+async def get_with_retry(
+    client: httpx.AsyncClient, url: str, *, retries: int = 2, base_delay: float = 0.5, **kwargs
+) -> httpx.Response:
+    """GET with exponential backoff. Every adapter here was a single
+    unretried request — one transient blip (a 429, a dropped connection, a
+    momentary 5xx from a free-tier job board) failed that whole source for
+    the request instead of just slowing it down. Retries only on the errors
+    where retrying can plausibly help; a 4xx other than 429 means retrying
+    would just get the same answer, so that's raised immediately.
+    """
+    attempt = 0
+    while True:
+        try:
+            resp = await client.get(url, **kwargs)
+            if resp.status_code == 429 or resp.status_code >= 500:
+                resp.raise_for_status()
+            return resp
+        except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+            attempt += 1
+            if attempt > retries:
+                raise
+            delay = base_delay * (2 ** (attempt - 1)) + random.uniform(0, 0.25)
+            logger.warning("retrying GET %s after error (%d/%d): %s", url, attempt, retries, exc)
+            await asyncio.sleep(delay)
 
 
 class JobSourceAdapter(Protocol):
@@ -106,7 +137,7 @@ class JSearchAdapter:
             "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
         }
         client = get_http_client()
-        resp = await client.get(JSEARCH_URL, params=params, headers=headers)
+        resp = await get_with_retry(client, JSEARCH_URL, params=params, headers=headers)
         resp.raise_for_status()
         data = resp.json()
 
@@ -165,7 +196,7 @@ class AdzunaAdapter:
             params["where"] = location
 
         client = get_http_client()
-        resp = await client.get(url, params=params)
+        resp = await get_with_retry(client, url, params=params)
         resp.raise_for_status()
         data = resp.json()
 
@@ -197,7 +228,7 @@ class RemotiveAdapter:
 
     async def search(self, query: str, location: str | None = None) -> list[RawJobPosting]:
         client = get_http_client()
-        resp = await client.get("https://remotive.com/api/remote-jobs", params={"search": query})
+        resp = await get_with_retry(client, "https://remotive.com/api/remote-jobs", params={"search": query})
         resp.raise_for_status()
         data = resp.json()
 
@@ -226,7 +257,7 @@ class RemoteOKAdapter:
 
     async def search(self, query: str, location: str | None = None) -> list[RawJobPosting]:
         async with httpx.AsyncClient(timeout=15.0, headers={"User-Agent": "CareerOS/0.1"}) as client:
-            resp = await client.get("https://remoteok.com/api")
+            resp = await get_with_retry(client, "https://remoteok.com/api")
             resp.raise_for_status()
             data = resp.json()
 
@@ -262,7 +293,7 @@ class ArbeitnowAdapter:
 
     async def search(self, query: str, location: str | None = None) -> list[RawJobPosting]:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get("https://www.arbeitnow.com/api/job-board-api")
+            resp = await get_with_retry(client, "https://www.arbeitnow.com/api/job-board-api")
             resp.raise_for_status()
             data = resp.json()
 
@@ -301,8 +332,19 @@ class MultiSourceAdapter:
     async def search(self, query: str, location: str | None = None) -> list[RawJobPosting]:
         results: list[RawJobPosting] = []
 
+        async def _tracked(adapter: JobSourceAdapter) -> list[RawJobPosting]:
+            name = f"source:{type(adapter).__name__}"
+            start = time.monotonic()
+            try:
+                out = await adapter.search(query, location)
+                agent_monitor.record(name, ok=True, latency_ms=(time.monotonic() - start) * 1000)
+                return out
+            except Exception as exc:
+                agent_monitor.record(name, ok=False, latency_ms=(time.monotonic() - start) * 1000, error=str(exc)[:300])
+                raise
+
         outcomes = await asyncio.gather(
-            *(a.search(query, location) for a in self._adapters), return_exceptions=True
+            *(_tracked(a) for a in self._adapters), return_exceptions=True
         )
         for adapter, outcome in zip(self._adapters, outcomes):
             if isinstance(outcome, Exception):
@@ -330,6 +372,7 @@ class SafeSingleSourceAdapter:
 
 
 def get_adapter() -> JobSourceAdapter:
+    settings = get_settings()
     if settings.job_api_mode != "live":
         return MockJobAdapter()
 
@@ -353,12 +396,16 @@ def get_adapter() -> JobSourceAdapter:
 
     if not configured:
         import logging
-        logging.getLogger("careeros").warning(
+        logger = logging.getLogger("careeros")
+        logger.error(
             "JOB_API_MODE=live but no job sources configured with valid credentials. "
-            "Falling back to MockJobAdapter. Set JSEARCH_API_KEY, ADZUNA_APP_ID/KEY, "
+            "Configure at least one of: JSEARCH_API_KEY, ADZUNA_APP_ID/KEY, "
             "or enable free sources (remotive, remoteok, arbeitnow) in JOB_SOURCES."
         )
-        return MockJobAdapter()  # live mode requested but no source has a working key
+        raise RuntimeError(
+            "No job sources configured for live mode. Set JOB_API_MODE=mock for development "
+            "or configure at least one job source for live mode."
+        )
     if len(configured) == 1:
         # Wrap the single source in a safe adapter so any network error / timeout
         # is caught gracefully and surfaced as an empty result (with a warning)
@@ -394,7 +441,7 @@ class _CompanyScraperAdapter:
         # If no results from company scraping, try a generic approach
         if not results:
             # Try scraping some known company career pages
-            company_names = _infer_company_names_from_query(query)
+            company_names = await _infer_company_names_from_query(query)
             # Scrape multiple companies concurrently with limited concurrency
             semaphore = asyncio.Semaphore(settings.company_scraper_max_concurrency)
             async def _scrape_one(company_name: str) -> list[RawJobPosting]:

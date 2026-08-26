@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import Tag from '../ui/Tag';
 import { useDragVelocity } from '../../hooks/useDragVelocity';
 import { project } from '../../utils/appleDesign';
+import { formatLabel } from '../../utils/format';
 
 /**
  * JobCard — a single job/internship posting.
@@ -146,7 +147,7 @@ export default function JobCard({ job, onOpen, onSave, saved = false }) {
               <Tag color={isIntern ? 'purple' : 'blue'} dot>
                 {isIntern ? 'Internship' : job.employment_type || 'Full-time'}
               </Tag>
-              {job.experience_level && <Tag>{job.experience_level}</Tag>}
+              {job.experience_level && <Tag>{formatLabel(job.experience_level)}</Tag>}
               {job.is_remote && <Tag color="green" dot>Remote</Tag>}
               {job.location && job.location !== 'Unknown' && <Tag>{job.location}</Tag>}
               {job.salary && <Tag color="orange">{job.salary}</Tag>}

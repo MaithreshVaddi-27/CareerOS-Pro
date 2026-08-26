@@ -11,8 +11,12 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-careeros}
       MYSQL_USER: ${MYSQL_USER:-careeros}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-careeros_password_change_me}
+    # Bound to loopback only — the backend reaches this over the internal
+    # careeros-net bridge network, not via this port. Only exposed at all so
+    # you can `mysql -h 127.0.0.1` for local debugging; not reachable from
+    # outside the host.
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -28,15 +32,17 @@ services:
     image: qdrant/qdrant:latest
     container_name: careeros-qdrant
     restart: unless-stopped
+    # Loopback-only, same reasoning as mysql above — backend talks to qdrant
+    # over careeros-net; these ports are just for local inspection.
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
     networks:
       - careeros-net
 
-  # --- Backend API (FastAPI + Granian) ---
+  # --- Backend API (FastAPI + Uvicorn) ---
   backend:
     build:
       context: .
@@ -52,9 +58,12 @@ services:
       APP_ENV: ${APP_ENV:-production}
       DATABASE_URL: mysql+pymysql://${MYSQL_USER:-careeros}:${MYSQL_PASSWORD:-careeros_password_change_me}@mysql:3306/${MYSQL_DATABASE:-careeros}
       JOB_API_MODE: ${JOB_API_MODE:-live}
-      JOB_SOURCES: ${JOB_SOURCES:-jsearch,adzuna,remotive,remoteok,arbeitnow}
+      JOB_SOURCES: ${JOB_SOURCES:-jsearch,adzuna,remotive,remoteok,arbeitnow,company}
       LLM_PROVIDER_MODE: ${LLM_PROVIDER_MODE:-auto}
       QDRANT_URL: http://qdrant:6333
+      # Frontend is served on 5173 in this stack — must be in the allow-list
+      # or the browser blocks every API call with a CORS error.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
       # Secrets passed via .env file mounted at runtime — never baked into image
     env_file:
       - .env
@@ -63,20 +72,20 @@ services:
     networks:
       - careeros-net
 
-  # --- Frontend (React + Vite) ---
+  # --- Frontend (React + Vite, built to a static bundle and served — not
+  # the dev server. For local hot-reload development, use `npm run dev`
+  # per the Frontend Setup section in the README instead of this service. ---
   frontend:
-    image: node:20-alpine
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-http://localhost:8000}
+        VITE_API_KEY: ${VITE_API_KEY:-}
     container_name: careeros-frontend
     restart: unless-stopped
-    working_dir: /app
     depends_on:
       - backend
-    environment:
-      VITE_API_BASE: http://localhost:8000
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
     ports:
       - "5173:5173"
     networks:

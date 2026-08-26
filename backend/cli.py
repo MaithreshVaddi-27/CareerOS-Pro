@@ -6,9 +6,9 @@ Usage:
 The CLI is a thin wrapper around ``scrape_company_jobs`` that returns JSON
 output suitable for piping into tools or for manual debugging.
 """
-import json
 import argparse
 import asyncio
+import json
 import re
 from typing import List, Optional
 

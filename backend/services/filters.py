@@ -1,6 +1,7 @@
 """Hard eligibility filters. Pure Python/logic. LLMs must never override these (spec 2.1)."""
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
+
 from backend.models import Job
 from backend.schemas import SearchRequest
 

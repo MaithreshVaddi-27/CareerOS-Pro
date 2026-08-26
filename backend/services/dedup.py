@@ -2,6 +2,7 @@
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from backend.models import Job
 from backend.schemas import NormalizedJob
 

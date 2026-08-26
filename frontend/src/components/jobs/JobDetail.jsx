@@ -1,6 +1,7 @@
 import Modal from '../ui/Modal';
 import Tag from '../ui/Tag';
 import Button from '../ui/Button';
+import { formatLabel } from '../../utils/format';
 
 export default function JobDetail({ job, onClose, onVerify, verifying }) {
   if (!job) return null;
@@ -28,7 +29,7 @@ export default function JobDetail({ job, onClose, onVerify, verifying }) {
         <Tag color={isIntern ? 'purple' : 'blue'} dot>
           {isIntern ? 'Internship' : job.employment_type || 'Full-time'}
         </Tag>
-        {job.experience_level ? <Tag>{job.experience_level}</Tag> : null}
+        {job.experience_level ? <Tag>{formatLabel(job.experience_level)}</Tag> : null}
         {job.is_remote ? <Tag color="green" dot>Remote</Tag> : null}
         {job.salary ? <Tag color="orange">{job.salary}</Tag> : null}
         {job.source ? <Tag color="teal">{job.source}</Tag> : null}

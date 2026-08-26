@@ -1,19 +1,31 @@
 """Single entrypoint. `python run.py` starts the API — no docker, no bare server
-command to remember. Runs on Granian (Rust-based ASGI server) instead of Uvicorn —
-Granian benchmarks meaningfully faster under concurrent load and ships a native
-worker-process manager, so there's no separate Gunicorn layer needed either.
+command to remember. Runs on Uvicorn (ASGI server) for broad compatibility.
 """
 
 import argparse
+import sys
+from pathlib import Path
 
-from granian import Granian
-from granian.constants import Interfaces
+import uvicorn
 
-from backend.config import get_settings
+# Load environment variables from .env file in project root
+# This ensures config can find MYSQL_PASSWORD, API_KEY, etc. regardless of where we run from
+project_root = Path(__file__).parent.parent
+env_file = project_root / ".env"
+if env_file.exists():
+    from dotenv import load_dotenv
+    load_dotenv(env_file)
+
+# Add the project root to Python path so backend can be imported as a module
+# This works whether we run from project root or backend directory
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from backend.core.config import get_settings  # noqa: E402 — must follow the sys.path fix-up above
 
 
 def main():
-    settings = get_settings()
+    get_settings()  # fail fast — surface a bad/missing env var here, before uvicorn boots
 
     parser = argparse.ArgumentParser(description="Run the CareerOS API")
     parser.add_argument("--host", default="127.0.0.1")
@@ -23,17 +35,14 @@ def main():
     parser.add_argument("--workers", type=int, default=1)
     args = parser.parse_args()
 
-    server = Granian(
+    uvicorn.run(
         "backend.main:app",
-        address=args.host,
+        host=args.host,
         port=args.port,
-        interface=Interfaces.ASGI,
-        workers=args.workers,
         reload=args.reload,
-        reload_paths=["backend"] if args.reload else None,
+        workers=args.workers,
         log_level="info",
     )
-    server.serve()
 
 
 if __name__ == "__main__":

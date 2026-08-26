@@ -1,5 +1,5 @@
 fastapi>=0.115
-granian>=1.5
+uvicorn[standard]>=0.30.0
 beautifulsoup4>=4.12
 pydantic>=2.7
 pydantic-settings>=2.3

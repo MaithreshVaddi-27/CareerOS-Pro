@@ -6,21 +6,19 @@ per‑domain concurrency limits, back‑off jitter, and supports concurrent
 scraping of multiple companies.
 """
 
-import re
+import asyncio
 import hashlib
 import logging
-import asyncio
 import random
-from typing import Optional, List, Dict, Any
-
+import re
+from typing import Dict, List, Optional
 from urllib.parse import urljoin, urlparse, urlunparse
 
 import httpx
 from bs4 import BeautifulSoup
 
-from backend.config import get_settings
+from backend.core.config import get_settings
 from backend.schemas import RawJobPosting
-from backend.services.normalize import hash_url
 
 logger = logging.getLogger("careeros")
 settings = get_settings()
@@ -371,7 +369,9 @@ class CompanyScraper:
                     source_id = self._compute_source_id(
                         title, company, normalized_location, apply_url
                     )
-                    url_hash = hash_url(apply_url)
+                    # url_hash isn't set here — normalize.py computes it from apply_url
+                    # for every source uniformly (see normalize_job()), so doing it again
+                    # here was dead work with no consumer.
 
                     posting = RawJobPosting(
                         source="company_scraper",

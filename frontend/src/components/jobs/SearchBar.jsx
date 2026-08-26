@@ -7,10 +7,12 @@ import SegmentedControl from '../ui/SegmentedControl';
  * Segmented control switches between Jobs and Internships (your use case).
  * Per §1, feedback is instant; per §7, the bar stays spatially anchored.
  */
+// value must match backend employment_type strings (see services/normalize.py _EMPLOYMENT_MAP) —
+// 'full-time' (hyphen) never matched stored 'full_time' rows, this filter was silently a no-op
 const JOB_TYPE = [
   { value: 'any', label: 'Any' },
   { value: 'internship', label: 'Internships' },
-  { value: 'full-time', label: 'Jobs' },
+  { value: 'full_time', label: 'Jobs' },
 ];
 
 export default function SearchBar({ onSearch, loading }) {

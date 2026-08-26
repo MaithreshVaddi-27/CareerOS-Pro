@@ -13,20 +13,21 @@ definition and doesn't need to survive a restart.
 
 from typing import TypedDict
 
-from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, StateGraph
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from backend.config import get_settings
+
+from backend.core.config import get_settings
 from backend.models import Job
-from backend.schemas import MatchRequest, SearchRequest, MatchedJobOut, JobOut
-from backend.services.job_api_adapter import get_adapter
-from backend.services.normalize import normalize_job
+from backend.schemas import MatchRequest, SearchRequest
 from backend.services.dedup import upsert_job
 from backend.services.filters import apply_hard_filters
-from backend.services.vector_store import get_client, index_job, semantic_search
+from backend.services.job_api_adapter import get_adapter
+from backend.services.model_router import get_model_router_for_request
+from backend.services.normalize import normalize_job
 from backend.services.reranker import ScoredJob, keyword_score, rerank
-from backend.services.model_router import get_model_router, get_model_router_for_request
+from backend.services.vector_store import get_client, index_job, semantic_search
 
 settings = get_settings()
 _checkpointer_singleton: dict = {}
@@ -56,8 +57,6 @@ async def get_checkpointer():
 
     try:
         from langgraph.checkpoint.mysql.aio import AIOMySQLSaver
-        import logging
-        logger = logging.getLogger("careeros")
 
         cm = AIOMySQLSaver.from_conn_string(_mysql_dsn())
         checkpointer = await cm.__aenter__()
@@ -121,7 +120,7 @@ async def _retrieve_and_rerank(state: CareerOSState, db: Session) -> CareerOSSta
     jobs_map = {}
     if state["candidate_ids"]:
         jobs = db.execute(
-            select(Job).where(Job.id.in_(state["candidate_ids"]), Job.is_active == True)
+            select(Job).where(Job.id.in_(state["candidate_ids"]), Job.is_active == True)  # noqa: E712 — SQLAlchemy column comparison, not a Python bool check
         ).scalars().all()
         jobs_map = {job.id: job for job in jobs}
 

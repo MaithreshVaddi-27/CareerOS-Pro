@@ -3,7 +3,7 @@
 import datetime as dt
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RawJobPosting(BaseModel):
@@ -31,7 +31,7 @@ class NormalizedJob(BaseModel):
     location_raw: str = ""
     location_normalized: str = "unknown"
     employment_type: str = "unknown"
-    experience_level: str = "unknown"  # intern/fresher/entry/mid/senior/unknown
+    experience_level: str = "unknown"  # intern/fresher/no_experience/entry/mid/senior/unknown
     remote: str = "unknown"  # remote/onsite/hybrid/unknown
     description: str = ""
     skills_required: list[str] = Field(default_factory=list)
@@ -67,13 +67,14 @@ class JobOut(BaseModel):
 
 
 class SearchRequest(BaseModel):
-    query: str
+    query: str = ""
     location: Optional[str] = None
     employment_type: Optional[str] = None
-    experience_level: Optional[str] = None  # intern/fresher/entry/mid/senior
+    experience_level: Optional[str] = None  # intern/fresher/no_experience/entry/mid/senior
     remote_only: bool = False
     min_salary: Optional[float] = None
     posted_within_days: Optional[int] = None
+    sources: Optional[list[str]] = None  # restrict results to these job sources (e.g. ["jsearch","company"])
     llm_provider: Optional[str] = None  # "auto" | "llama" | "gemini" | "openrouter" | "nvidia" | "none"
     model_name: Optional[str] = None
 

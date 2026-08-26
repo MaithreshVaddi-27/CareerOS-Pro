@@ -3,13 +3,14 @@
 import datetime as dt
 import uuid
 
+from sqlalchemy import JSON, Boolean, DateTime, Float, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from backend.core.db import Base
+
 
 def _utcnow() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
-
-from sqlalchemy import String, DateTime, Boolean, Float, Text, JSON
-from sqlalchemy.orm import Mapped, mapped_column
-from backend.db import Base
 
 
 def _uuid() -> str:
@@ -33,7 +34,7 @@ class Job(Base):
     location_raw: Mapped[str] = mapped_column(String(512), default="")
     location_normalized: Mapped[str] = mapped_column(String(256), default="unknown")
     employment_type: Mapped[str] = mapped_column(String(64), default="unknown")
-    experience_level: Mapped[str] = mapped_column(String(32), default="unknown")  # intern/fresher/entry/mid/senior/unknown
+    experience_level: Mapped[str] = mapped_column(String(32), default="unknown")  # intern/fresher/no_experience/entry/mid/senior/unknown
     remote: Mapped[str] = mapped_column(String(32), default="unknown")  # remote/onsite/hybrid/unknown
 
     description: Mapped[str] = mapped_column(Text, default="")

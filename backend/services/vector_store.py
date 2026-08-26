@@ -13,8 +13,9 @@ import threading
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qm
-from backend.config import get_settings
-from backend.services.embeddings import get_embedding_provider, EmbeddingProvider
+
+from backend.core.config import get_settings
+from backend.services.embeddings import EmbeddingProvider, get_embedding_provider
 
 COLLECTION = "jobs"
 

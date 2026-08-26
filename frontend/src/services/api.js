@@ -1,5 +1,13 @@
 // API service — calls CareerOS FastAPI backend.
 const BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+// Only needed if the backend has API_KEY set in its .env (see backend .env.example).
+// If the backend's API_KEY is empty, require_api_key() is a no-op and this header
+// is simply ignored — safe to always send.
+const API_KEY = import.meta.env.VITE_API_KEY || '';
+
+function authHeaders(extra = {}) {
+  return API_KEY ? { ...extra, 'X-API-Key': API_KEY } : extra;
+}
 
 /** Transform backend JobOut to frontend JobCard format. */
 function transformJob(job) {
@@ -73,22 +81,25 @@ export async function searchJobs({
   const payload = {
     query: query?.trim() || '',
     location: location?.trim() || (location ? location.trim() : undefined),
+    // Filters.jsx now supplies backend-format values directly (e.g. 'full_time', 'no_experience') —
+    // no more label-guessing/toLowerCase() here, that was the bug that made these filters no-ops.
     employment_type: employment_type || undefined,
-    experience_level: experience_level && experience_level !== 'Any' ? experience_level.toLowerCase() : undefined,
+    experience_level: experience_level || undefined,
     // Backend expects remote_only: true for remote-only filter
     remote_only: remote === 'remote' ? true : false,
     min_salary: salary_min ? Number(salary_min) : undefined,
     posted_within_days: posted_within_days ? Number(posted_within_days) : undefined,
+    sources: sources && sources.length ? sources : undefined,
     llm_provider: llm_provider || undefined,
     model_name: model_name || undefined,
   };
 
   const r = await fetch(`${BASE}/jobs/search`, {
     method: 'POST',
-    headers: {
+    headers: authHeaders({
       'Content-Type': 'application/json',
       'X-Request-ID': crypto.randomUUID()
-    },
+    }),
     body: JSON.stringify(payload),
   });
   if (!r.ok) throw new Error(`Search failed: ${r.status}`);
@@ -103,7 +114,7 @@ export async function searchJobs({
 export async function matchJobs(payload) {
   const r = await fetch(`${BASE}/jobs/match`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Request-ID': crypto.randomUUID() },
+    headers: authHeaders({ 'Content-Type': 'application/json', 'X-Request-ID': crypto.randomUUID() }),
     body: JSON.stringify(payload),
   });
   if (!r.ok) throw new Error(`Match failed: ${r.status}`);
@@ -114,7 +125,7 @@ export async function matchJobs(payload) {
 
 /** Fetch a single job by id and transform for frontend. */
 export async function getJob(id) {
-  const r = await fetch(`${BASE}/jobs/${id}`);
+  const r = await fetch(`${BASE}/jobs/${id}`, { headers: authHeaders() });
   if (!r.ok) throw new Error(`Get job failed: ${r.status}`);
   const job = await r.json();
   return transformJob(job);
@@ -124,7 +135,7 @@ export async function getJob(id) {
 export async function verifyJob(id) {
   const r = await fetch(`${BASE}/jobs/${id}/verify`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Request-ID': crypto.randomUUID() },
+    headers: authHeaders({ 'Content-Type': 'application/json', 'X-Request-ID': crypto.randomUUID() }),
   });
   if (!r.ok) throw new Error(`Verify failed: ${r.status}`);
   return r.json();

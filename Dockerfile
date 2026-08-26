@@ -24,5 +24,11 @@ COPY --chown=careeros:careeros backend/ ./backend/
 # Expose backend port
 EXPOSE 8000
 
-# Start the backend with Granian
+# Container-level health check — docker/orchestrator can now see when the app
+# isn't ready (e.g. DB unreachable) instead of treating "container running"
+# as "container healthy". No curl in this slim image, so use Python directly.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3).status == 200 else 1)"]
+
+# Start the backend with Uvicorn
 CMD ["python", "-m", "backend.run", "--host", "0.0.0.0", "--port", "8000"]

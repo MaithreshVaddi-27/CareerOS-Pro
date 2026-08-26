@@ -9,11 +9,14 @@ rolling alias 'gemini-flash-latest' (config default) so this doesn't silently
 """
 
 import json
+import time
 from typing import Protocol
 
 import httpx
 from pydantic import BaseModel, ValidationError
-from backend.config import get_settings
+
+from backend.core.config import get_settings
+from backend.core.monitoring import agent_monitor
 
 settings = get_settings()
 
@@ -162,6 +165,17 @@ class ModelRouter:
         }
         return providers.get(name)
 
+    async def _call(self, name: str, provider: "LLMProvider", prompt: str) -> MatchExplanation:
+        """Call one LLM provider agent, timed + reported to the agent monitor."""
+        start = time.monotonic()
+        try:
+            result = await provider.structured(prompt, MatchExplanation)
+            agent_monitor.record(f"llm:{name}", ok=True, latency_ms=(time.monotonic() - start) * 1000)
+            return result
+        except Exception as exc:
+            agent_monitor.record(f"llm:{name}", ok=False, latency_ms=(time.monotonic() - start) * 1000, error=str(exc)[:300])
+            raise
+
     async def explain_match(self, job_title: str, job_description: str, candidate_skills: list[str]) -> MatchExplanation:
         prompt = (
             "Candidate skills: " + ", ".join(candidate_skills) + "\n"
@@ -177,7 +191,7 @@ class ModelRouter:
             provider = self._get_provider(self._provider_mode)
             if provider:
                 try:
-                    return await provider.structured(prompt, MatchExplanation)
+                    return await self._call(self._provider_mode, provider, prompt)
                 except (httpx.HTTPError, ValidationError, KeyError, json.JSONDecodeError, RuntimeError) as e:
                     return MatchExplanation(explanation=f"LLM error: {type(e).__name__}")
             return MatchExplanation(explanation=f"unknown — provider '{self._provider_mode}' not configured")
@@ -186,7 +200,7 @@ class ModelRouter:
         # 1. Try local llama.cpp first (private, fast, free)
         if self._llama:
             try:
-                result = await self._llama.structured(prompt, MatchExplanation)
+                result = await self._call("llama", self._llama, prompt)
                 if result.confidence >= 0.6:
                     return result
             except (httpx.HTTPError, ValidationError, KeyError, json.JSONDecodeError):
@@ -195,7 +209,7 @@ class ModelRouter:
         # 2. Try NVIDIA NIM (optimized inference, free tier available)
         if self._nvidia:
             try:
-                result = await self._nvidia.structured(prompt, MatchExplanation)
+                result = await self._call("nvidia", self._nvidia, prompt)
                 if result.confidence >= 0.6:
                     return result
             except Exception:
@@ -204,7 +218,7 @@ class ModelRouter:
         # 3. Try OpenRouter (100+ models, free tier available)
         if self._openrouter:
             try:
-                result = await self._openrouter.structured(prompt, MatchExplanation)
+                result = await self._call("openrouter", self._openrouter, prompt)
                 if result.confidence >= 0.6:
                     return result
             except Exception:
@@ -213,7 +227,7 @@ class ModelRouter:
         # 4. Try Google Gemini (generous free tier)
         if self._gemini:
             try:
-                return await self._gemini.structured(prompt, MatchExplanation)
+                return await self._call("gemini", self._gemini, prompt)
             except (httpx.HTTPError, ValidationError, KeyError, json.JSONDecodeError):
                 pass
 

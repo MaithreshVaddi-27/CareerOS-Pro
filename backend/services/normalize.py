@@ -4,7 +4,8 @@ import hashlib
 import re
 from datetime import datetime, timezone
 from urllib.parse import urlsplit, urlunsplit
-from backend.schemas import RawJobPosting, NormalizedJob
+
+from backend.schemas import NormalizedJob, RawJobPosting
 
 _REMOTE_WORDS = ("remote", "work from home", "wfh")
 _HYBRID_WORDS = ("hybrid",)
@@ -27,10 +28,16 @@ _EMPLOYMENT_MAP = {
 _EXPERIENCE_MARKERS = [
     ("intern", "intern"),
     ("internship", "intern"),
+    ("freshers welcome", "fresher"),
     ("fresher", "fresher"),
+    ("no prior experience", "no_experience"),
+    ("no experience required", "no_experience"),
+    ("no experience necessary", "no_experience"),
+    ("no experience", "no_experience"),
+    ("0 years of experience", "no_experience"),
+    ("0 years experience", "no_experience"),
     ("entry level", "entry"),
     ("entry-level", "entry"),
-    ("no experience", "entry"),
     ("0-1 year", "entry"),
     ("graduate", "entry"),
     ("junior", "entry"),
@@ -47,11 +54,13 @@ _EXPERIENCE_MARKERS = [
 ]
 
 _SALARY_RE = re.compile(
-    r"(?P<currency>₹|\$|€|£|Rs\.?|INR|USD|EUR|GBP)?\s*"
+    r"(?P<prefix_currency>₹|\$|€|£|Rs\.?|INR|USD|EUR|GBP)?\s*"
     r"(?P<min>[\d,]+(?:\.\d+)?)\s*(?P<min_k>k|K)?"
-    r"(?:\s*[-–to]+\s*(?:₹|\$|€|£|Rs\.?|INR|USD|EUR|GBP)?\s*"
-    r"(?P<max>[\d,]+(?:\.\d+)?)\s*(?P<max_k>k|K)?)?"
-    r"(?:\s*(?P<postfix>Rs\.?|INR|USD|EUR|GBP))?"
+    r"(?:\s*[-–to]+\s*"
+    r"(?:(?P<mid_currency>₹|\$|€|£|Rs\.?|INR|USD|EUR|GBP)?\s*)?"
+    r"(?P<max>[\d,]+(?:\.\d+)?)\s*(?P<max_k>k|K)?"
+    r")?"
+    r"(?:\s*(?P<postfix_currency>Rs\.?|INR|USD|EUR|GBP))?"
 )
 
 _CURRENCY_MAP = {
@@ -142,13 +151,19 @@ def parse_salary(raw: str | None) -> tuple[float | None, float | None, str]:
     lo = to_float(m.group("min"))
     if m.group("min_k"):
         lo *= 1000
-    hi = to_float(m.group("max")) or lo
+    hi_raw = to_float(m.group("max"))
+    hi = hi_raw if hi_raw is not None else lo
     if m.group("max_k"):
         hi *= 1000
-    # Prefer prefix currency if present, otherwise check postfix
-    currency_raw = (m.group("currency") or "").strip().lower()
-    if not currency_raw:
-        currency_raw = (m.group("postfix") or "").strip().lower()
+    # Ensure min <= max
+    if lo is not None and hi is not None and lo > hi:
+        lo, hi = hi, lo
+    # Determine currency: prefer prefix, then mid-range, then postfix
+    currency_raw = (
+        (m.group("prefix_currency") or "")
+        or (m.group("mid_currency") or "")
+        or (m.group("postfix_currency") or "")
+    ).strip().lower()
     currency = _CURRENCY_MAP.get(currency_raw, "unknown")
     return lo, hi, currency
 
@@ -167,13 +182,24 @@ def parse_posted_at(raw: str | None) -> datetime | None:
     return None
 
 
+_SOURCE_ID_MAX = 512
+
+
+def safe_source_id(source_id: str) -> str:
+    """Cap to DB column width. Long IDs (e.g. JSearch base64 blobs) get hashed
+    to a fixed-length digest instead of truncated, so uniqueness is kept."""
+    if len(source_id) <= _SOURCE_ID_MAX:
+        return source_id
+    return "sha256:" + hashlib.sha256(source_id.encode("utf-8")).hexdigest()
+
+
 def normalize_job(raw: RawJobPosting) -> NormalizedJob:
     location_normalized, remote = parse_location(raw.location_raw)
     salary_min, salary_max, currency = parse_salary(raw.salary_raw)
 
     return NormalizedJob(
         source=raw.source,
-        source_id=raw.source_id,
+        source_id=safe_source_id(raw.source_id),
         title=raw.title.strip(),
         company=raw.company.strip(),
         location_raw=raw.location_raw,
