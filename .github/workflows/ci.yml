@@ -6,6 +6,20 @@ on:
   pull_request:
     branches: [main]
 
+# A new push supersedes an in-flight run for the same ref. Saves CI minutes and
+# avoids acting on a stale result.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+  # Pinned deliberately. Ruff's default rule set changes between minor releases
+  # (0.17 went from ~5 rules to 400+), so an unpinned `pip install ruff` makes
+  # CI fail or pass based on whatever the runner resolved that day.
+  RUFF_VERSION: "0.17.1"
+
 jobs:
   backend-tests:
     runs-on: ubuntu-latest
@@ -15,7 +29,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
 
       - name: Install dependencies
@@ -23,7 +37,8 @@ jobs:
 
       - name: Lint (ruff)
         run: |
-          pip install ruff
+          pip install "ruff==$RUFF_VERSION"
+          ruff --version
           ruff check backend/ tests/
 
       - name: Run tests
@@ -40,7 +55,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 

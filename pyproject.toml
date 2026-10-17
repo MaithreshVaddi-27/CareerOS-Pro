@@ -1,0 +1,43 @@
+# CareerOS-Pro — tooling configuration.
+#
+# This file exists for *tool config only*. CareerOS is an application, not a
+# published package, so there is deliberately no [build-system] / [project]
+# table here. Runtime dependencies live in requirements.txt.
+#
+# Pytest config intentionally lives in pytest.ini, not here: pytest.ini takes
+# precedence over pyproject.toml, so duplicating it would create dead config.
+#
+# The ruff section is load-bearing for CI. Ruff's default rule set is not
+# stable across releases (0.17 expanded it from ~5 rules to 400+), so a bare
+# `ruff check` in CI silently changes meaning on every runner upgrade. Pin the
+# rule set here so `ruff check backend/ tests/` means the same thing locally
+# and on CI, forever.
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+# Only backend/ and tests/ are linted; backend/venv is ignored explicitly so a
+# stray local venv can never be picked up.
+extend-exclude = ["backend/venv", ".ruff_cache"]
+
+[tool.ruff.lint]
+# Deliberate, stable set: pyflakes (F) + the importable subset of pycodestyle
+# (E4 imports, E7 statements, E9 runtime/syntax) + isort (I).
+select = ["E4", "E7", "E9", "F", "I"]
+ignore = [
+  # `from __future__ import annotations` is the norm in the service layer and
+  # isort wants to move it, which breaks the runtime side-effect ordering that
+  # backend/run.py depends on.
+  "I002",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["backend", "tests"]
+
+[tool.ruff.lint.per-file-ignores]
+# tests/ legitimately imports optional/heavy adapters only to assert on wiring.
+"tests/*" = ["F401"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
