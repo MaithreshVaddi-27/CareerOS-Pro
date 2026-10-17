@@ -39,7 +39,23 @@ jobs:
         run: |
           pip install "ruff==$RUFF_VERSION"
           ruff --version
-          ruff check backend/ tests/
+          ruff check backend/ tests/ alembic/
+
+      - name: Check migrations match models
+        # Fails if the SQLAlchemy models and the Alembic revisions have drifted.
+        # Also asserted by tests/test_migrations.py; running it here means a
+        # drift shows up as its own named CI failure rather than a test failure
+        # buried in the suite.
+        # Uses a throwaway SQLite file (the models are portable types), so CI
+        # needs no database service. The app itself is MySQL-only; this is only
+        # a schema-equality check.
+        env:
+          MYSQL_PASSWORD: ci-placeholder
+          API_KEY: ci-placeholder
+        run: |
+          DB="sqlite:///${{ runner.temp }}/schema-check.db"
+          alembic -x db_url="$DB" upgrade head
+          alembic -x db_url="$DB" check
 
       - name: Run tests
         run: python -m pytest -v

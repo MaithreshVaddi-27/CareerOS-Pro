@@ -42,6 +42,23 @@ services:
     networks:
       - careeros-net
 
+  # --- Redis (shared rate-limit counters) ---
+  # Behind a profile so it does NOT start on a plain `docker compose up`. Enable
+  # with `docker compose --profile ratelimit up` and set REDIS_URL in .env.
+  # Without it the backend uses per-process counters, which under-limit by the
+  # worker count — fine for one worker, wrong for several.
+  redis:
+    image: redis:7-alpine
+    container_name: careeros-redis
+    restart: unless-stopped
+    profiles: ["ratelimit"]
+    # Rate-limit keys are disposable counters with TTLs; persistence buys nothing.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - careeros-net
+
   # --- Backend API (FastAPI + Uvicorn) ---
   backend:
     build:
@@ -61,6 +78,11 @@ services:
       JOB_SOURCES: ${JOB_SOURCES:-jsearch,adzuna,remotive,remoteok,arbeitnow,company}
       LLM_PROVIDER_MODE: ${LLM_PROVIDER_MODE:-auto}
       QDRANT_URL: http://qdrant:6333
+      # Shared rate-limit counters. Only meaningful with the `ratelimit` profile;
+      # left empty the backend falls back to per-process counters.
+      REDIS_URL: ${REDIS_URL:-}
+      # Fail fast rather than silently degrade to in-memory checkpoints.
+      CHECKPOINT_STRICT: ${CHECKPOINT_STRICT:-false}
       # Frontend is served on 5173 in this stack — must be in the allow-list
       # or the browser blocks every API call with a CORS error.
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
@@ -94,6 +116,7 @@ services:
 volumes:
   mysql_data:
   qdrant_data:
+  redis_data:
 
 networks:
   careeros-net:

@@ -33,9 +33,19 @@ from backend.services.vector_store import get_client, index_job, semantic_search
 settings = get_settings()
 _checkpointer_singleton: dict = {}
 
+# What the checkpointer actually resolved to, recorded so /health can report it
+# without awaiting. A silent fall back to MemorySaver previously looked identical
+# to a healthy durable setup from the outside; now it is visible.
+_checkpoint_status: dict = {"kind": "unknown", "detail": "checkpointer not initialised yet"}
+
 # Fan-out cap for per-job LLM explanations. High enough to hide provider
 # latency, low enough not to trip provider rate limits on a large top_k.
 _EXPLAIN_CONCURRENCY = 5
+
+
+def checkpoint_status() -> dict:
+    """Snapshot of the active checkpointer. Safe to call from sync code."""
+    return dict(_checkpoint_status)
 
 
 def _mysql_dsn() -> str:
@@ -52,9 +62,15 @@ async def get_checkpointer():
     Falls back to MemorySaver if MySQL checkpointing fails (e.g. MySQL 9.x
     disallows MD5 in generated columns used by AIOMySQLSaver.setup()).
     MemorySaver is fine for dev — checkpoints survive the request, not a restart.
+
+    Set CHECKPOINT_STRICT=true to refuse that fallback in production: there,
+    a silent downgrade means human-review state vanishes on restart.
     """
     # Use MemorySaver for local development
     if settings.app_env == "development":
+        _checkpoint_status.update(
+            kind="memory", detail="MemorySaver (APP_ENV=development, not restart-durable)"
+        )
         return MemorySaver()
 
     if "instance" in _checkpointer_singleton:
@@ -68,17 +84,30 @@ async def get_checkpointer():
         await checkpointer.setup()  # idempotent — creates tables first time only
         _checkpointer_singleton["cm"] = cm
         _checkpointer_singleton["instance"] = checkpointer
+        _checkpoint_status.update(
+            kind="mysql", detail="AIOMySQLSaver (restart-durable)"
+        )
         return checkpointer
     except Exception as exc:
         import logging
-        logging.getLogger("careeros").warning(
+
+        log = logging.getLogger("careeros")
+        if settings.checkpoint_strict:
+            _checkpoint_status.update(kind="unavailable", detail=f"MySQL setup failed: {exc}")
+            raise
+        log.warning(
             "MySQL checkpointer setup failed (%s) — falling back to MemorySaver. "
-            "This is fine for local dev (MySQL 9.x MD5 restriction). "
-            "Use MySQL 8.x or a Postgres-compatible store in production.",
+            "Checkpoints will NOT survive a restart. Use MySQL 8.x (9.x disallows "
+            "the MD5 used in generated columns), or set CHECKPOINT_STRICT=true to "
+            "fail fast instead of degrading.",
             exc,
         )
         saver = MemorySaver()
         _checkpointer_singleton["instance"] = saver
+        _checkpoint_status.update(
+            kind="memory",
+            detail=f"DEGRADED - MySQL setup failed, checkpoints not restart-durable: {exc}",
+        )
         return saver
 
 

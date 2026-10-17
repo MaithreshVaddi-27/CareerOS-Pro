@@ -10,7 +10,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from backend.core.config import get_settings
-from backend.core.db import Base, engine, get_db, sync_schema
+from backend.core.db import get_db
 from backend.core.middleware import (
     RateLimitMiddleware,
     RequestContextMiddleware,
@@ -33,9 +33,9 @@ _warn_if_unsafe_rate_limit_config()
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: create database tables, then widen any drifted columns
-    Base.metadata.create_all(bind=engine)
-    sync_schema()
+    # No schema DDL here. Alembic is the single source of truth for schema —
+    # run `alembic upgrade head` as a deploy step. Startup DDL (create_all +
+    # a widen-VARCHAR patch) was what let environments drift apart silently.
     yield  # Application runs here
     # Shutdown: close reusable HTTP clients
     from backend.services.job_api_adapter import _http_client
@@ -83,12 +83,32 @@ def health():
         health_status["checks"]["database"] = {"status": "degraded", "detail": str(e)}
         health_status["status"] = "degraded"
 
-    # Check rate limiting configuration
+    # Rate limiting: report which counter store is actually in use. Per-process
+    # counters under-limit by the worker count, so that is a degraded production
+    # posture rather than a config detail.
+    shared = bool(settings.redis_url)
     health_status["checks"]["rate_limit"] = {
-        "status": "ok" if not (settings.api_key and settings.app_env == "production") else "configurable",
-        "detail": f"rate_limit_per_minute={settings.rate_limit_per_minute}"
+        "status": "ok" if (shared or settings.app_env != "production") else "degraded",
+        "backend": "redis" if shared else "in-process",
+        "detail": (
+            f"rate_limit_per_minute={settings.rate_limit_per_minute}, "
+            f"backend={'redis (shared)' if shared else 'in-process (per-worker)'}"
+        ),
     }
     if health_status["checks"]["rate_limit"]["status"] == "degraded":
+        health_status["status"] = "degraded"
+
+    # Checkpointer: a silent MemorySaver fallback looks identical to a healthy
+    # durable setup from the outside, so surface which one is actually running.
+    from backend.graph import checkpoint_status
+
+    cp = checkpoint_status()
+    health_status["checks"]["checkpoint"] = {
+        "status": "ok" if cp["kind"] in ("mysql", "memory") and not cp["detail"].startswith("DEGRADED") else "degraded",
+        "kind": cp["kind"],
+        "detail": cp["detail"],
+    }
+    if health_status["checks"]["checkpoint"]["status"] == "degraded":
         health_status["status"] = "degraded"
 
     # Check embedding model availability

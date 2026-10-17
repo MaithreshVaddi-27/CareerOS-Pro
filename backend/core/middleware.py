@@ -1,12 +1,14 @@
-"""Request-id tracing + optional API-key auth + in-memory rate limiting.
+"""Request-id tracing + optional API-key auth + rate limiting.
 
 Auth is opt-in: set API_KEY in env to require an X-API-Key header on every
 request. No API_KEY set -> open, same as before (dev-friendly default, but
 now there's a real switch to flip for prod instead of nothing at all).
 
-Rate limiting is a simple in-memory sliding window per client IP — good
-enough for a single-process deploy; swap for a Redis-backed limiter if you
-run multiple workers/instances and need a shared counter.
+Rate limiting is a fixed window per client IP. Two backends:
+
+- REDIS_URL set   -> shared counters, correct across workers and instances.
+- REDIS_URL empty -> in-process dicts. Fine for one worker; with N workers the
+  effective limit is N x RATE_LIMIT_PER_MINUTE, so startup warns about it.
 """
 
 import logging
@@ -15,6 +17,7 @@ import uuid
 from collections import defaultdict, deque
 
 from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from backend.core.config import get_settings
@@ -26,11 +29,63 @@ _request_counts: dict[str, deque] = defaultdict(deque)
 _burst_counts: dict[str, deque] = defaultdict(deque)
 _RATE_LIMIT_WINDOW_SECONDS = 60
 
+# Created lazily on first use so importing this module never touches Redis.
+_redis = None
+_redis_unavailable = False
+
+
+def _get_redis():
+    """Return a Redis client, or None if REDIS_URL is unset.
+
+    Falls back to None permanently after a connection failure: a limiter that
+    silently degrades to per-process counters mid-request would reintroduce the
+    exact multi-worker bug this backend exists to fix, so we keep trying but log
+    loudly on every attempt.
+    """
+    global _redis, _redis_unavailable
+    if _redis is None and settings.redis_url and not _redis_unavailable:
+        try:
+            import redis.asyncio as aioredis
+
+            _redis = aioredis.from_url(
+                settings.redis_url,
+                encoding="utf-8",
+                decode_responses=True,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+            )
+        except Exception as exc:
+            _redis_unavailable = True
+            logger.error("REDIS_URL is set but redis client init failed (%s)", exc)
+    return _redis
+
+
+async def _redis_limit(client, key: str, limit: int, window: int) -> bool:
+    """Increment `key` and return True if the caller is now over `limit`.
+
+    INCR + EXPIRE is atomic per key, so concurrent workers cannot both read
+    "count == limit-1" and both admit.
+    """
+    count = await client.incr(key)
+    if count == 1:
+        await client.expire(key, window)
+    return count > limit
+
+
+def _memory_limit(client_ip: str, store: dict, limit: int, window: int) -> bool:
+    now = time.monotonic()
+    bucket = store[client_ip]
+    while bucket and now - bucket[0] > window:
+        bucket.popleft()
+    if len(bucket) >= limit:
+        return True
+    bucket.append(now)
+    return False
+
 
 def _warn_if_unsafe_rate_limit_config() -> None:
-    """Log a warning if multi-worker deployment with in-memory rate limiting."""
-    # In production with workers > 1, in-memory rate limiting is per-process
-    # and won't be shared across workers. This is a common misconfiguration.
+    """Log a warning if the configured rate limit is self-defeating, or if
+    per-process counters are in use where a shared counter is needed."""
     if settings.rate_limit_per_minute <= 0:
         logger.warning(
             f"rate_limit_per_minute must be positive, got {settings.rate_limit_per_minute}. "
@@ -46,16 +101,21 @@ def _warn_if_unsafe_rate_limit_config() -> None:
             f"rate_limit_per_minute is very high ({settings.rate_limit_per_minute}). "
             "This may be ineffective as a rate limit. Consider a maximum of 100-200 requests/minute for most APIs."
         )
-    elif settings.rate_limit_per_minute and settings.app_env == "production":
-        # Granian sets WORKER_COUNT env or can be detected via process count
-        # We can't reliably detect worker count here, so warn if API_KEY is set
-        # (indicating prod intent) and rate limiting is enabled
-        if settings.api_key:
-            logger.warning(
-                "Rate limiting enabled with in-memory backend in production. "
-                "With multiple workers, each worker has a separate counter. "
-                "Use a Redis-backed limiter for shared rate limiting."
-            )
+
+    if (
+        settings.rate_limit_per_minute > 0
+        and not settings.redis_url
+        and settings.api_key
+        and settings.app_env == "production"
+    ):
+        # API_KEY + production both indicate real deployment intent, which is
+        # exactly where a per-process counter under-limits.
+        logger.warning(
+            "Rate limiting uses in-process counters (REDIS_URL is not set). "
+            "With multiple workers each worker counts independently, so the "
+            "effective limit is workers x RATE_LIMIT_PER_MINUTE. Set REDIS_URL "
+            "to share counters, or run a single worker."
+        )
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
@@ -96,41 +156,47 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.limit = requests_per_minute
         self.burst_limit = burst_limit if burst_limit is not None else requests_per_minute
         self.burst_window = burst_window_seconds
-        # Separate tracking for burst window - use module-level variable
-        pass  # _burst_counts is accessed as a global variable in dispatch method
+
+    @staticmethod
+    def _throttled(request: Request, reason: str, client_ip: str) -> JSONResponse:
+        request_id = getattr(request.state, "request_id", "unknown")
+        logger.warning("request_id=%s rate_limited ip=%s (%s)", request_id, client_ip, reason)
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "rate limit exceeded, try again shortly"},
+            headers={"Retry-After": str(_RATE_LIMIT_WINDOW_SECONDS)},
+        )
 
     async def dispatch(self, request: Request, call_next):
         if request.url.path == "/health":
             return await call_next(request)
+        if self.limit <= 0:
+            return await call_next(request)
 
         client_ip = request.client.host if request.client else "unknown"
-        now = time.monotonic()
+        redis = _get_redis()
 
-        # Check standard rate limit (60-second window)
-        window = _request_counts[client_ip]
-        while window and now - window[0] > _RATE_LIMIT_WINDOW_SECONDS:
-            window.popleft()
+        if redis is not None:
+            try:
+                # Minute-aligned buckets so the counter resets on a wall-clock
+                # boundary shared by every worker, rather than per-worker TTLs.
+                bucket = int(time.time() // _RATE_LIMIT_WINDOW_SECONDS)
+                if await _redis_limit(redis, f"rl:min:{client_ip}:{bucket}", self.limit, _RATE_LIMIT_WINDOW_SECONDS * 2):
+                    return self._throttled(request, "standard limit", client_ip)
+                burst = int(time.time() // self.burst_window)
+                if await _redis_limit(redis, f"rl:burst:{client_ip}:{burst}", self.burst_limit, self.burst_window * 2):
+                    return self._throttled(request, "burst limit", client_ip)
+                return await call_next(request)
+            except Exception as exc:
+                # Fail open rather than 500 every request because the counter store
+                # is briefly unreachable, but say so loudly — this is exactly the
+                # state the Redis backend exists to avoid.
+                logger.error("redis rate-limit backend failed (%s); failing open", exc)
 
-        if len(window) >= self.limit:
-            request_id = getattr(request.state, "request_id", "unknown")
-            logger.warning("request_id=%s rate_limited ip=%s (standard limit)", request_id, client_ip)
-            from fastapi.responses import JSONResponse
-            return JSONResponse(status_code=429, content={"detail": "rate limit exceeded, try again shortly"})
-
-        # Check burst limit (shorter window)
-        burst_window = _burst_counts[client_ip]
-        while burst_window and now - burst_window[0] > self.burst_window:
-            burst_window.popleft()
-
-        if len(burst_window) >= self.burst_limit:
-            request_id = getattr(request.state, "request_id", "unknown")
-            logger.warning("request_id=%s rate_limited ip=%s (burst limit)", request_id, client_ip)
-            from fastapi.responses import JSONResponse
-            return JSONResponse(status_code=429, content={"detail": "rate limit exceeded, try again shortly"})
-
-        # Add request to both windows
-        window.append(now)
-        burst_window.append(now)
+        if _memory_limit(client_ip, _request_counts, self.limit, _RATE_LIMIT_WINDOW_SECONDS):
+            return self._throttled(request, "standard limit", client_ip)
+        if _memory_limit(client_ip, _burst_counts, self.burst_limit, self.burst_window):
+            return self._throttled(request, "burst limit", client_ip)
         return await call_next(request)
 
 

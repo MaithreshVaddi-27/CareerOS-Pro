@@ -49,6 +49,16 @@ class Settings(BaseSettings):
     api_key: str
     rate_limit_per_minute: int = 60
 
+    # Shared rate-limit counter store. Empty keeps the in-process limiter, which is
+    # correct for a single worker but means N workers enforce N x the limit. Set
+    # this (e.g. redis://redis:6379/0) before running multiple workers.
+    redis_url: str = ""
+
+    # Refuse to start instead of silently falling back to in-memory checkpoints when
+    # MySQL checkpointing fails. Off by default so local dev still works; turn on in
+    # production where losing checkpoints across restarts actually matters.
+    checkpoint_strict: bool = False
+
     # Comma-separated list of allowed CORS origins. Defaults cover local dev
     # (Vite on 5173, CRA-style on 3000) so nothing breaks out of the box —
     # override in production with your real frontend origin(s), e.g.
