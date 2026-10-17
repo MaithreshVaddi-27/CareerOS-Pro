@@ -1,464 +1,444 @@
-# CareerOS‑Pro
+<div align="center">
 
-AI‑powered career intelligence platform that **autonomously discovers, filters, ranks, and explains** job and internship opportunities. It aggregates listings from multiple free and paid sources, normalizes them deterministically, deduplicates, applies hard eligibility filters, and uses an LLM routing pipeline to explain matches.
+# CareerOS
+
+**A self-hosted job-intelligence platform: aggregate postings from many sources, hard-filter them deterministically, rank them by hybrid keyword + semantic score, and explain every match with auditable LLM evidence.**
+
+[![CI](https://github.com/VaddiMaithresh-16/CareerOS-Pro/actions/workflows/ci.yml/badge.svg)](https://github.com/VaddiMaithresh-16/CareerOS-Pro/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+</div>
 
 ---
 
-## Table of Contents
+## Table of contents
 
-- [Features](#features)
-- [Architecture](#architecture)
-- [Project Structure](#project-structure)
-- [Supported Platforms](#supported-platforms)
-- [Setup Order of Execution](#setup-order-of-execution)
-- [Quick Start](#quick-start)
-- [Backend Setup](#backend-setup)
-- [Frontend Setup](#frontend-setup)
-- [Docker Deployment](#docker-deployment)
+- [Why it exists](#why-it-exists)
+- [How it works](#how-it-works)
+- [Quick start](#quick-start)
 - [Configuration](#configuration)
-- [CLI Usage](#cli-usage)
-- [Testing](#testing)
-- [Monitoring](#monitoring)
-- [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
+- [API reference](#api-reference)
+- [Architecture](#architecture)
+- [Job sources](#job-sources)
+- [The LLM layer](#the-llm-layer)
+- [The company scraper](#the-company-scraper)
+- [Development](#development)
+- [Documentation](#documentation)
+- [Project status](#project-status)
 - [License](#license)
 
 ---
 
-## Features
+## Why it exists
 
-- **Multi‑source aggregation** — JSearch (RapidAPI), Adzuna, Remotive, RemoteOK, Arbeitnow, plus a free company‑career‑page scraper (BeautifulSoup4).
-- **Deterministic normalization** — no LLM in the parsing path. Location/remote classification, employment‑type mapping, experience‑level classification (`intern`/`fresher`/`no_experience`/`entry`/`mid`/`senior`/`unknown`), and salary parsing with currency conversion.
-- **Two‑stage deduplication** — exact `url_hash` first, then `content_hash` fallback.
-- **Hard eligibility filters** — pure logic, LLM never overrides (employment type, experience, remote‑only, location alias matching, query string, min salary, posted‑within‑days).
-- **LLM routing & explanation** — LangGraph state machine with multi‑provider fallback (LlamaCpp → NVIDIA NIM → OpenRouter → Gemini).
-- **Two‑stage verification** — cheap HTTP HEAD check, then Firecrawl content scrape. Never invents a result.
-- **Polite company scraper** — per‑domain concurrency control (semaphore), exponential backoff with jitter, in‑memory HTML cache. Runs as the `company` job source alongside the API adapters — free, no API key, uses BeautifulSoup4 (already in `requirements.txt`).
-- **Agent health monitoring** — every LLM provider and job‑source adapter is a self‑contained agent that can fail independently without taking the system down. `GET /agents/health` reports per‑agent call counts, failure rate, latency, and status (`healthy`/`degraded`/`down`) — see [`backend/core/monitoring.py`](backend/core/monitoring.py).
+Most job-search tooling makes you trust a black box: it hands you a ranked list and you
+cannot tell *why* anything is on it, or whether the "skills" it matched are actually in the
+job description.
+
+CareerOS is built the other way around:
+
+| Principle | How it is enforced in code |
+|---|---|
+| **Deterministic where it matters** | Filtering, normalization, dedup and ranking are pure Python. No LLM decides what you are eligible for. |
+| **Never invent data** | A field that cannot be read from the source stays `unknown`. Nothing is guessed to fill a gap. |
+| **Every match is auditable** | `/jobs/match` returns `evidence` — the skills quoted from the posting — alongside the model's conclusion. |
+| **Grounded generation** | The match prompt is CRAFT-structured with an explicit grounding pass and a "subset of candidate skills" constraint. |
+| **Local-first, credential-optional** | Runs with zero API keys in `mock` mode. Every integration degrades to "no results", never to a crash. |
+
+---
+
+## How it works
+
+```
+        ┌──────────────────────┐
+        │  Job source adapters │   JSearch · Adzuna · Remotive · RemoteOK
+        │  (concurrent, fanned)│   Arbeitnow · company career pages
+        └──────────┬───────────┘
+                   │  RawJobPosting  (raw source text, never pre-normalized)
+                   ▼
+        ┌──────────────────────┐
+        │     normalize.py     │   deterministic parse → NormalizedJob
+        │                      │   unknown stays unknown
+        └──────────┬───────────┘
+                   ▼
+        ┌──────────────────────┐
+        │      dedup.py         │   url_hash (unique) + content_hash
+        └──────────┬───────────┘
+                   │ created only → index
+                   ▼
+        ┌──────────────────────┐
+        │   vector_store.py    │   Qdrant (embedded) or in-process fallback
+        └──────────┬───────────┘
+                   ▼
+        ┌──────────────────────┐
+        │      filters.py      │   HARD filters — employment, level, remote,
+        │                      │   salary, age, location
+        └──────────┬───────────┘
+                   ▼
+        ┌──────────────────────┐
+        │    reranker.py       │   hybrid = weighted(keyword, semantic)
+        └──────────┬───────────┘
+                   ▼
+        ┌──────────────────────┐
+        │    model_router.py   │   grounded explanation, provider fallback
+        │                      │   llama → NVIDIA → OpenRouter → Gemini
+        └──────────┬───────────┘
+                   ▼
+        ┌──────────────────────┐
+        │   human_review       │   LangGraph interrupt — nothing is
+        │   (interrupt)        │   auto-applied, ever
+        └──────────────────────┘
+```
+
+The whole match path is a [LangGraph](https://langchain-ai.github.io/langgraph/) state
+machine (`backend/graph.py`). It is **linear and unconditional** — the LLM never overrides
+a hard filter, and the graph pauses for human review before anything is marked
+ready-to-apply.
+
+---
+
+## Quick start
+
+### Prerequisites
+
+| Requirement | Version | Notes |
+|---|---|---|
+| Python | 3.12 | Backend runtime |
+| Node.js | 20+ | Frontend build |
+| MySQL | 8.0+ | System of record. SQLite/Postgres are **not** supported. |
+
+### 1. Configure
+
+```bash
+git clone https://github.com/VaddiMaithresh-16/CareerOS-Pro.git
+cd CareerOS-Pro
+cp .env.example .env
+```
+
+Two values have **no defaults** and the app will refuse to start without them:
+
+```dotenv
+MYSQL_PASSWORD=your-password
+API_KEY=choose-a-long-random-string
+```
+
+> MySQL 8.x only. MySQL 9.x disallows MD5 in generated columns, which breaks the
+> LangGraph checkpoint tables. The app falls back to in-memory checkpoints with a
+> warning rather than failing.
+
+### 2. Backend
+
+```bash
+python -m venv backend/venv
+source backend/venv/bin/activate        # Windows: backend\venv\Scripts\activate
+pip install -r requirements.txt
+
+# Start MySQL (Docker is the least friction)
+docker run -d --name careeros-mysql \
+  -e MYSQL_ROOT_PASSWORD=rootpass \
+  -e MYSQL_DATABASE=careeros \
+  -e MYSQL_USER=careeros \
+  -e MYSQL_PASSWORD=your-password \
+  -p 3306:3306 mysql:8
+
+python run.py                            # → http://127.0.0.1:8000
+```
+
+Interactive API docs: <http://127.0.0.1:8000/docs>
+
+### 3. Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev                              # → http://127.0.0.1:5173
+```
+
+Set `VITE_API_BASE=http://127.0.0.1:8000` in `frontend/.env`.
+
+### Docker (both services)
+
+```bash
+cp .env.example .env                     # then edit MYSQL_PASSWORD + API_KEY
+docker compose up --build
+```
+
+### Verify it works
+
+```bash
+curl -H "X-API-Key: $API_KEY" \
+     -H 'Content-Type: application/json' \
+     -d '{"query":"python","candidate_skills":["Python","FastAPI"]}' \
+     http://127.0.0.1:8000/jobs/match
+```
+
+You should get a ranked list with `evidence`, `matched_skills`, `missing_skills`
+and a `confidence` per job. With no API keys configured it still runs — every
+provider returns a graceful "no LLM available" explanation rather than failing.
+
+---
+
+## Configuration
+
+Every variable is documented inline in [`.env.example`](.env.example). The
+scraper-related knobs are summarised here because they are the ones most often
+tuned:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `COMPANY_CAREER_PAGE_PATTERNS` | *(empty)* | Extra career paths to probe, highest priority first. Use it to teach a new ATS layout **without touching code**. |
+| `COMPANY_SCRAPER_MAX_URL_PROBES` | `4` | How many paths are probed per company. |
+| `COMPANY_SCRAPER_CACHE_SIZE` | `100` | Cached HTML pages held in memory. |
+| `COMPANY_SCRAPER_CACHE_TTL_SECONDS` | `900` | Cache lifetime. `0` disables expiry. |
+| `COMPANY_SCRAPER_MAX_CONCURRENCY` | `5` | Concurrent requests **per domain** — keeps us polite. |
+| `COMPANY_SCRAPER_TIMEOUT_SECONDS` | `20` | Per-request HTTP timeout. |
+| `COMPANY_SCRAPER_MAX_RETRIES` | `2` | Retries *after* the first attempt. 4xx never retries. |
+| `COMPANY_SCRAPER_USER_AGENT` | `CareerOS/1.0 …` | Identify yourself to the sites you scrape. |
+
+Full reference: **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)**.
+
+---
+
+## API reference
+
+All routes except `/health*` require the `X-API-Key` header.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/health` | — | Component health: DB, rate limiter, embeddings, vector store. |
+| `GET` | `/health/ready` | — | Readiness probe. `200` when servable, `503` otherwise. |
+| `GET` | `/agents/health` | key | Per-agent call counts, latency and failure rate. |
+| `POST` | `/jobs/search` | key | Fan out to all sources, normalize, dedup, hard-filter. |
+| `GET` | `/jobs/{job_id}` | key | Fetch one posting. |
+| `POST` | `/jobs/match` | key | Full pipeline: search → rank → grounded explanation. |
+| `POST` | `/jobs/{job_id}/verify` | key | Confirm a posting is still live. Requires `FIRECRAWL_API_KEY`. |
+
+<details>
+<summary>Request / response bodies</summary>
+
+**`POST /jobs/search`**
+
+```jsonc
+// request
+{
+  "query": "python",
+  "location": "Berlin",
+  "employment_type": "full_time",   // optional
+  "experience_level": "senior",     // optional
+  "remote_only": false,
+  "min_salary": 0,
+  "posted_within_days": 30,
+  "sources": ["jsearch", "company"] // optional; defaults to JOB_SOURCES
+}
+// → [ JobOut, … ]
+```
+
+**`POST /jobs/match`**
+
+```jsonc
+// request
+{
+  "query": "python",
+  "candidate_skills": ["Python", "FastAPI", "PostgreSQL"],
+  "top_k": 10,
+  "llm_provider": "auto"   // auto | llama | gemini | openrouter | nvidia | none
+}
+// → [ MatchedJobOut, … ]
+```
+
+`MatchedJobOut` is where the grounding guarantee is visible:
+
+```jsonc
+{
+  "job": { /* JobOut */ },
+  "keyword_score": 0.71,
+  "semantic_score": 0.84,
+  "hybrid_score":  0.79,
+  "evidence": "python|fastapi|kubernetes",   // quoted from the posting
+  "matched_skills": ["Python", "FastAPI"],
+  "missing_skills": ["Kubernetes"],
+  "explanation": "Strong overlap on backend Python; no container experience stated.",
+  "confidence": 0.8
+}
+```
+
+</details>
+
+Full reference with error shapes: **[docs/API.md](docs/API.md)**.
 
 ---
 
 ## Architecture
 
 ```
-Frontend (React 19 + Vite + Framer Motion)
-        │  REST / CORS
-        ▼
-Backend (FastAPI + Granian)
-  ├─ core/config.py               → pydantic_settings, env‑driven
-  ├─ core/db.py                   → engine/session + startup schema sync
-  ├─ core/middleware.py           → request-id, API-key auth, rate limiting
-  ├─ models/job.py                → MySQL Job model (source of truth)
-  ├─ schemas/job.py                → pydantic request/response schemas
-  ├─ services/job_api_adapter.py   → MultiSourceAdapter (JSearch, Adzuna, Remotive, RemoteOK, Arbeitnow)
-  ├─ services/company_scraper.py    → BeautifulSoup4 career‑page scraper
-  ├─ services/normalize.py          → deterministic field normalization
-  ├─ services/dedup.py              → url_hash + content_hash dedup
-  ├─ services/filters.py            → hard eligibility filters
-  ├─ services/verification.py       → HEAD + Firecrawl verify
-  ├─ graph.py                       → LangGraph match/explain pipeline
-  └─ main.py                        → FastAPI app + routes + lifespan
-        │
-        ├─ MySQL (canonical job store)
-        └─ Qdrant (vector retrieval for semantic ranking)
+backend/
+├── core/            cross-cutting concerns
+│   ├── config.py    env-driven Settings, lru_cached
+│   ├── db.py        engine, SessionLocal, Base, schema sync
+│   ├── middleware.py  request-id, security headers, rate limit, API-key auth
+│   └── monitoring.py  AgentMonitor — per-agent latency/failure stats
+├── models/          SQLAlchemy ORM (Job)
+├── schemas/         Pydantic request/response contracts
+├── services/        business logic — all of it here, one concern per file
+│   ├── company_scraper.py  career-page scraping
+│   ├── job_api_adapter.py  source adapters + fan-out
+│   ├── normalize.py        deterministic parsing
+│   ├── dedup.py            upsert by hash
+│   ├── filters.py          hard filters
+│   ├── vector_store.py     Qdrant + fallback
+│   ├── reranker.py         hybrid scoring
+│   ├── model_router.py     LLM providers + grounded prompting
+│   ├── embeddings.py       embedding providers
+│   └── verification.py     liveness check
+├── graph.py         LangGraph orchestration (no business logic)
+├── main.py          FastAPI app + routes
+├── cli.py           scrape a single company to JSON
+└── run.py           entrypoint
 ```
 
-**Data flow:** Sources → Normalize → Dedup → Filters → DB → (optional) LLM match/verify → Frontend.
+**The one rule that keeps this codebase navigable:** `main.py` and `graph.py` contain
+no business logic. `graph.py` in particular is pure orchestration — every node just
+calls a service function. If you find yourself writing a `if` about job data in
+`graph.py`, it belongs in `services/`.
+
+See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the data flow, the
+extension points, and the design decisions behind the layout.
 
 ---
 
-## Project Structure
+## Job sources
 
-```
-CareerOS-Pro/
-├── backend/
-│   ├── main.py            # FastAPI app, routes, startup/shutdown lifespan
-│   ├── run.py              # process entrypoint (uvicorn/granian launcher)
-│   ├── cli.py               # `python -m backend.cli` company-scraper CLI
-│   ├── graph.py              # LangGraph match/explain state machine
-│   ├── core/                  # cross-cutting infra — nothing job-domain-specific here
-│   │   ├── config.py            # env-driven settings (pydantic_settings)
-│   │   ├── db.py                 # SQLAlchemy engine/session + sync_schema()
-│   │   └── middleware.py         # request-id, API-key auth, rate limiting
-│   ├── models/                # SQLAlchemy ORM models
-│   │   └── job.py
-│   ├── schemas/                # pydantic request/response contracts
-│   │   └── job.py
-│   └── services/               # business logic, one concern per file
-│       ├── job_api_adapter.py
-│       ├── company_scraper.py
-│       ├── normalize.py
-│       ├── dedup.py
-│       ├── filters.py
-│       ├── verification.py
-│       ├── model_router.py
-│       └── vector_store.py
-├── frontend/
-│   ├── src/
-│   │   ├── components/{jobs,layout,ui}/
-│   │   ├── services/api.js       # backend REST client
-│   │   ├── hooks/
-│   │   └── utils/
-│   └── vite.config.js
-├── tests/                    # pytest, mirrors backend/ by concern not by path
-├── .env.example
-├── docker-compose.yml
-├── Dockerfile
-└── README.md
-```
+Enable via the comma-separated `JOB_SOURCES` variable. All fan out concurrently;
+a failing source degrades to an empty result and never fails the request.
 
-`backend/models/__init__.py` and `backend/schemas/__init__.py` re-export their single
-module (`Job`, and the request/response classes) so existing code doing
-`from backend.models import Job` / `from backend.schemas import SearchRequest` keeps working —
-only `backend.config`/`backend.db`/`backend.middleware` importers need the new `backend.core.`
-prefix. `models/` and `schemas/` are single-file packages today (one domain: jobs) — split further
-into `models/job.py` + `models/user.py` etc. only once a second domain actually shows up; don't
-pre-build structure for entities that don't exist yet.
+| Source | Credential | Notes |
+|---|---|---|
+| `jsearch` | `JSEARCH_API_KEY` | Broad aggregator, best coverage. |
+| `adzuna` | `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` | Strong in UK/EU markets. |
+| `remotive` | none | Remote-first, generous limits. |
+| `remoteok` | none | Remote-only, no key needed. |
+| `arbeitnow` | none | EU-focused, no key needed. |
+| `company` | none | Scrapes the company's own career pages. |
+
+Set `JOB_API_MODE=mock` for offline development — returns a deterministic fixture set
+and performs no network I/O.
 
 ---
 
-## Supported Platforms
+## The LLM layer
 
-CareerOS‑Pro runs on **macOS**, **Linux**, and **Windows**. Commands below are shown per platform where they differ.
+The router tries providers in a fixed, deterministic order and moves on when one
+errors **or** returns low confidence:
 
-| Requirement | Version | Notes |
-|-------------|---------|-------|
-| Python      | 3.11+   | Backend runtime |
-| Node.js     | 20+     | Frontend toolchain |
-| MySQL       | 8.0+    | Canonical job store |
-| Docker      | 24+     | Optional, for containerized deploy |
-| Git         | any modern | For cloning |
+```
+llama.cpp (local, private) → NVIDIA NIM → OpenRouter → Gemini
+```
 
-**Shell conventions used in this guide**
+You can pin a single provider per request with `llm_provider`, or globally with
+`LLM_PROVIDER_MODE`.
 
-| Platform | Shell | Notes |
-|----------|-------|-------|
-| macOS / Linux | Bash / Zsh | Commands run as‑written. |
-| Windows (PowerShell) | `PS>` | Use `python` or `py` depending on install; paths use backslashes or quoted forward slashes. |
-| Windows (WSL2) | Bash | Same as Linux — recommended for the smoothest experience. |
-| Windows (CMD) | `C:\>` | Use `python` instead of `python3`; `venv\Scripts\activate.bat` instead of `source`. |
+**The prompt.** `backend/services/model_router.py` builds one prompt per job, reused
+across every provider attempt so routing cannot change what is being asked:
 
-> **Tip (Windows):** If `python` is not on your PATH, use `py` (the Python launcher). For the backend venv on Windows, activate with `venv\Scripts\activate` (PowerShell) or `venv\Scripts\activate.bat` (CMD).
+- **CRAFT structure** — Role / Context / Action / Format / Tone. The Role and the
+  grounding contract exist to suppress the one failure that matters: inventing skills.
+- **TOON serialization** — the request ships as `key::value` scalars and pipe-delimited
+  lists (`candidate.skills[12]:: python|docker|kubernetes`) instead of JSON. For a
+  twelve-item list that is one delimiter per item rather than per-item quoting and braces.
+- **Bounded input** — the description is truncated to 1200 characters and newlines are
+  collapsed, so posting text cannot forge structure in the request block.
+- **A short ordered grounding pass** before answering: find skills you can point at,
+  split them, re-check every entry against its source span, drop what you cannot source.
+- **A worked example**, because small local models drift on JSON shape without one.
+
+The model must return `matched_skills` as a strict subset of your declared skills.
+`confidence < 0.5` is expected on a thin posting — that is the router escalating, not
+failing.
 
 ---
 
-## Setup Order of Execution
+## The company scraper
 
-Run these steps **in order**. Later steps depend on earlier ones being complete.
+Free, credential-free, and deliberately conservative.
 
-1. **Clone the repository** — get the code locally.
-2. **Install toolchains** — Python 3.11+ and Node 20+ must both be available.
-3. **Provision the database** — start MySQL (native or via Docker) and ensure it is reachable. The backend builds the schema on first run.
-4. **Create and configure `.env`** — copy `.env.example` to `.env` and fill in DB credentials and any API keys. This must exist before the backend starts.
-5. **Install backend dependencies** — create a venv and install requirements.
-6. **Install frontend dependencies** — `npm install` in the frontend directory.
-7. **Start the backend** — runs the API on `http://localhost:8000`.
-8. **Start the frontend** — runs the app on `http://localhost:5173`.
-9. **(Optional) Run tests** — verify the setup with `pytest`.
+**Finding the page.** Guessing `/careers` is wrong more often than it is right, so the
+scraper probes a list of candidate paths concurrently and takes the first page that
+actually yields job cards — not the first page that returns 200. A generic landing page
+that mentions "career" does not end the search. Add ATS-specific paths via
+`COMPANY_CAREER_PAGE_PATTERNS` rather than editing code.
 
-Do **not** start the frontend before the backend is up, since the frontend calls the API at `http://localhost:8000` by default.
+**Politeness.** Concurrency is capped **per domain**, retries use exponential backoff
+with jitter, 429/5xx retry while 4xx fails immediately (a 403 will not become a 200),
+responses are cached with a TTL so repeat queries do not re-hit the site, and the
+`User-Agent` identifies the project.
 
----
-
-## Quick Start
-
-### macOS / Linux (Bash / Zsh)
+**Extraction.** Company, location, employment type and apply URL are read from labelled
+elements when the page provides them. What cannot be read stays empty so
+`normalize.py` can mark it `unknown` — the scraper never guesses.
 
 ```bash
-# Backend (terminal 1)
-cd backend
-python -m venv venv && source venv/bin/activate
-pip install -r ../requirements.txt
-cp ../.env.example ../.env   # then fill in DB + API keys
-python run.py
-# API:    http://localhost:8000
-# Docs:   http://localhost:8000/docs
-
-# Frontend (terminal 2)
-cd frontend
-npm install
-npm run dev
-# App:    http://localhost:5173
-```
-
-### Windows (PowerShell)
-
-```powershell
-# Backend (terminal 1)
-cd backend
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-pip install -r ..\requirements.txt
-Copy-Item ..\.env.example ..\.env   # then fill in DB + API keys
-python run.py
-# API:    http://localhost:8000
-# Docs:   http://localhost:8000/docs
-
-# Frontend (terminal 2)
-cd frontend
-npm install
-npm run dev
-# App:    http://localhost:5173
-```
-
-### Windows (WSL2 — Bash)
-
-```bash
-# Same as macOS / Linux. WSL2 shares the Windows filesystem but runs a real Linux shell.
-# Backend (terminal 1)
-cd backend
-python3 -m venv venv && source venv/bin/activate
-pip install -r ../requirements.txt
-cp ../.env.example ../.env
-python run.py
-
-# Frontend (terminal 2)
-cd frontend && npm install && npm run dev
-```
-
-> Requires Python 3.11+ and Node 20+ on all platforms.
-
----
-
-## Backend Setup
-
-### macOS / Linux
-
-```bash
-cd backend
-python -m venv venv && source venv/bin/activate
-pip install -r ../requirements.txt
-cp ../.env.example ../.env   # then fill in DB + API keys
-python run.py
-```
-
-### Windows (PowerShell)
-
-```powershell
-cd backend
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-pip install -r ..\requirements.txt
-Copy-Item ..\.env.example ..\.env
-python run.py
-```
-
-### Windows (CMD)
-
-```cmd
-cd backend
-python -m venv venv
-venv\Scripts\activate.bat
-pip install -r ..\requirements.txt
-copy ..\.env.example ..\.env
-python run.py
-```
-
-**Important Security Note**: `MYSQL_PASSWORD` has no default and must be set in your `.env` file — the backend won't start without it. `API_KEY` must also be *present* in `.env` (even as an empty value — that's the shipped default) but does **not** need to be filled in: empty means no auth required, which is fine for local development. Only set `API_KEY` to a real value if you're exposing the backend somewhere untrusted — and if you do, set `VITE_API_KEY` to the exact same value in `frontend/.env`, or every frontend request will fail with `401 Unauthorized`.
-
-The backend expects a reachable MySQL instance. `DATABASE_URL` is constructed from `MYSQL_*` env vars (see `.env.example`). Qdrant is optional for semantic ranking but recommended.
-
-The backend is powered by Uvicorn (ASGI server) for optimal performance and compatibility.
-
-#### Starting MySQL (per platform)
-
-**macOS (Homebrew):**
-```bash
-brew install mysql
-brew services start mysql
-```
-
-**Linux (Debian/Ubuntu):**
-```bash
-sudo apt update && sudo apt install -y mysql-server
-sudo service mysql start
-```
-
-**Windows (WSL2):**
-```bash
-sudo apt update && sudo apt install -y mysql-server
-sudo service mysql start
-```
-
-**Any platform (Docker):**
-```bash
-docker run -d --name careeros-mysql \
-  -e MYSQL_ROOT_PASSWORD=rootpass \
-  -e MYSQL_DATABASE=careeros \
-  -p 3306:3306 \
-  mysql:8.0
+# Scrape one company to JSON
+python -m backend.cli "Acme Corp" --location Berlin --max-concurrency 2
 ```
 
 ---
 
-## Frontend Setup
+## Development
 
 ```bash
-cd frontend
-cp .env.example .env   # optional — default already points at http://localhost:8000
-npm install
-npm run dev
+source backend/venv/bin/activate
+pip install "ruff==0.17.1"
+
+ruff check backend/ tests/       # lint
+ruff check backend/ tests/ --fix
+python -m pytest -v             # tests
 ```
 
-The frontend reads `VITE_API_BASE` (defaults to `http://localhost:8000`). CORS is pre‑configured for ports `5173` and `3000`. On Windows, the same commands apply in PowerShell, CMD, or WSL2.
+Ruff is **pinned in CI on purpose**. Its default rule set changed drastically in 0.17,
+so an unpinned `pip install ruff` makes CI pass or fail based on whatever the runner
+resolved that day. The rule set is pinned in `pyproject.toml`; pytest config lives in
+`pytest.ini` (which takes precedence, so it is not duplicated).
+
+The frontend has no test suite — `npm run build` is the available signal.
+
+Workflow, conventions and the review checklist: **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)**.
 
 ---
 
-## Docker Deployment
+## Documentation
 
-```bash
-# Build and start full stack (backend + MySQL + Qdrant + frontend)
-docker compose up -d
-
-# Or backend image only
-docker build -t careeros-pro .
-docker run -p 8000:8000 -e APP_ENV=production careeros-pro
-```
-
-**Multi‑platform builds:** To build for a non‑native architecture (e.g., ARM on an x86 machine, or vice versa):
-
-```bash
-docker buildx create --use
-docker buildx build --platform linux/amd64,linux/arm64 -t careeros-pro . --load
-```
-
-**Security note:** The `Dockerfile` does **not** copy `.env` files into the image. Mount secrets at runtime via `env_file` in `docker-compose.yml` or `-e` flags. `.env` is git‑ignored.
+| Document | What it covers |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module map, data flow, design decisions, extension points |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Local, Docker and production deployment; MySQL caveats |
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every environment variable, defaults and interactions |
+| [docs/API.md](docs/API.md) | Endpoint reference, request/response shapes, error semantics |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | Dev workflow, testing conventions, PR checklist |
+| [docs/AUDIT.md](docs/AUDIT.md) | **Deep audit**: known weaknesses, degradation behaviour, upgrade path |
 
 ---
 
-## Configuration
+## Project status
 
-All configuration is environment‑driven via `backend/core/config.py` (pydantic_settings). Key groups:
+Active development. Honest summary of where it stands:
 
-| Group | Highlights |
-|-------|-----------|
-| Application | `APP_ENV` (development \| production) |
-| Database | `MYSQL_*` components or explicit `DATABASE_URL` (MySQL only) |
-| Job APIs | `JOB_API_MODE` (mock \| live), `JOB_SOURCES`, JSearch/Adzuna keys |
-| AI/LLM | `LLM_PROVIDER_MODE`, per‑provider keys & models |
-| Vector | `QDRANT_URL` |
-| Verification | `FIRECRAWL_API_KEY` |
-| Security | `API_KEY`, `RATE_LIMIT_PER_MINUTE` |
+**Working and tested** — multi-source aggregation, deterministic normalization and
+dedup, hard filtering, hybrid ranking, grounded LLM explanation, career-page
+scraping, liveness verification, health and agent monitoring, CI.
 
-See [`.env.example`](.env.example) for the full template with inline docs.
+**Known limitations** — no database migrations (schema is reconciled at startup);
+in-memory rate limiting does not work across multiple workers; the vector store falls
+back to a local in-process implementation; the human-review interrupt is wired but the
+resume path is not yet exposed over HTTP.
 
-### Company Scraper Settings
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `company_scraper_max_concurrency` | `5` | Max concurrent requests **per domain**. |
-| `company_scraper_jitter_max` | `0.5` | Max seconds of random jitter on retry backoff. |
-| `company_scraper_cache_size` | `100` | Max cached HTML responses (in memory). |
-| `company_career_page_patterns` | `[]` | Custom URL patterns for career pages. |
-
-Enable via `JOB_SOURCES=company`.
-
----
-
-## CLI Usage
-
-```bash
-# macOS / Linux
-python -m backend.cli <company_name> [options]
-
-# Windows (use py if python is not on PATH)
-py -m backend.cli <company_name> [options]
-```
-
-| Flag | Type | Description |
-|------|------|-------------|
-| `--location <text>` | string | Location filter (e.g., "Remote"). |
-| `--url <text>` | string | Custom career‑page URL (bypasses auto‑construction). |
-| `--salary-min <float>` | float | Minimum salary filter. |
-| `--salary-max <float>` | float | Maximum salary filter. |
-| `--max-concurrency <int>` | int | Override per‑domain concurrency. |
-| `--jitter-max <float>` | float | Override max retry jitter. |
-
-Example:
-```bash
-python -m backend.cli Google --max-concurrency 10 --jitter-max 1.0
-```
-
----
-
-## Testing
-
-```bash
-# macOS / Linux / WSL2
-pytest -v
-
-# Windows
-py -m pytest -v
-```
-
-Tests use `respx` for HTTP mocking — no real network calls.
-
-See [UPGRADE_ROADMAP.md](UPGRADE_ROADMAP.md) for recent improvements and testing status.
-
----
-
-## Monitoring
-
-`GET /agents/health` (requires `X-API-Key` if `API_KEY` is set) returns per-agent stats for
-every LLM provider and job-source adapter:
-
-```json
-{
-  "llm:gemini": {"status": "healthy", "calls": 42, "failures": 1, "failure_rate": 0.024, "avg_latency_ms": 812.3, "last_error": null},
-  "source:JSearchAdapter": {"status": "degraded", "calls": 20, "failures": 5, "failure_rate": 0.25, "avg_latency_ms": 1340.0, "last_error": "..."},
-  "source:_CompanyScraperAdapter": {"status": "unknown", "calls": 0, "failures": 0, "failure_rate": 0.0, "avg_latency_ms": 0.0}
-}
-```
-
-`status` is `unknown` (no calls yet), `healthy`, `degraded` (>20% failure rate), or `down`
-(every call so far failed). This is per-process, in-memory — resets on restart, and isn't
-shared across workers/instances (same caveat as the in-memory rate limiter, see Troubleshooting).
-For multi-worker production, point this at a shared store (Redis) instead.
-
----
-
-## Troubleshooting
-
-**Every request gets `401 Unauthorized`**
-Two separate causes, both now fixed at the source:
-1. The frontend previously never sent `X-API-Key` at all — fixed, it now sends it from `VITE_API_KEY` in `frontend/.env`, on every call.
-2. `.env.example` used to ship `API_KEY=your_secure_api_key_here` — a real, non-empty value, not an obvious placeholder — so anyone who ran `cp .env.example .env` without editing that line got auth silently turned on with a key the frontend had no way to know about. Fixed: the shipped default is now `API_KEY=` (empty = open access, the intended dev default).
-
-**If you still see this after updating:** you likely have an old `.env` file (from before this fix) still carrying the literal value `your_secure_api_key_here`. Open `backend/.env` (or wherever your `.env` lives) and either clear that line to `API_KEY=`, or set `VITE_API_KEY` in `frontend/.env` to that exact same value. Restart both the backend and the frontend dev server after editing — env files are only read at process start.
-
-**`pymysql.err.DataError: (1406, "Data too long for column 'source_id'")`**
-`Base.metadata.create_all()` only creates tables that don't exist yet — it never widens a column
-on a table that's already there. If your `jobs` table was created before `source_id` grew to
-`VARCHAR(512)` in `models.py`, the live column stays at its old, shorter width forever and any
-long source ID (JSearch's RapidAPI job IDs can run past 500 chars) blows the insert.
-Fixed as of this version: `backend/core/db.py:sync_schema()` runs on every startup, compares each
-`String` column against the model, and `ALTER TABLE ... MODIFY` widens any that drifted — no
-manual migration needed, just restart the backend. `normalize.py:safe_source_id()` also hashes
-any source ID over 512 chars to a `sha256:...` digest as a second line of defense.
-
-**One bad job in a search response used to 500 the whole `/jobs/search` call**
-A single row that failed to insert (bad data, DB error) aborted the whole request and the other
-55 fetched jobs were lost too. Each job insert is now wrapped in its own try/except with a
-`db.rollback()` on failure — a bad row is logged and skipped, everything else still saves.
-
-**Employment type / experience filters in the UI silently return nothing**
-The frontend used to send display labels straight to the API (`'Full-time'`, `'Senior'`, raw
-`.toLowerCase()`), while the backend stores normalized snake_case values (`'full_time'`,
-`'senior'`). Hyphen vs. underscore and casing meant those filters never matched. Fixed — the
-`EMP_TYPES`/`EXP_LEVELS`/`JOB_TYPE` option lists now carry the actual backend value, and the API
-layer passes it through unmodified instead of re‑deriving it from the label.
-
----
-
-## Contributing
-
-1. Follow existing code style and type‑hint conventions.
-2. Include unit tests for new functionality.
-3. Update `UPGRADE_ROADMAP.md` for user‑facing changes.
-4. Never hard‑code secrets — use `.env` (git‑ignored).
+These are tracked with severity and remediation cost in
+**[docs/AUDIT.md](docs/AUDIT.md)**.
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[MIT](LICENSE) © CareerOS contributors.
