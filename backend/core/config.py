@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     company_scraper_max_retries: int = 2  # Retries after the first attempt
     company_scraper_max_url_probes: int = 4  # Career URL patterns probed per company
     company_scraper_user_agent: str = (
-        "CareerOS/1.0 (+https://github.com/VaddiMaithresh-16/CareerOS-Pro)"
+        "CareerOS/1.0 (+https://github.com/MaithreshVaddi-27/CareerOS-Pro)"
     )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

@@ -26,7 +26,7 @@ Local development, Docker, and production. See
 ### 1. Configure
 
 ```bash
-git clone https://github.com/VaddiMaithresh-16/CareerOS-Pro.git
+git clone https://github.com/MaithreshVaddi-27/CareerOS-Pro.git
 cd CareerOS-Pro
 cp .env.example .env
 ```

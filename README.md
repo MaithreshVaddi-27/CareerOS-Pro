@@ -4,7 +4,7 @@
 
 **A self-hosted job-intelligence platform: aggregate postings from many sources, hard-filter them deterministically, rank them by hybrid keyword + semantic score, and explain every match with auditable LLM evidence.**
 
-[![CI](https://github.com/VaddiMaithresh-16/CareerOS-Pro/actions/workflows/ci.yml/badge.svg)](https://github.com/VaddiMaithresh-16/CareerOS-Pro/actions/workflows/ci.yml)
+[![CI](https://github.com/MaithreshVaddi-27/CareerOS-Pro/actions/workflows/ci.yml/badge.svg)](https://github.com/MaithreshVaddi-27/CareerOS-Pro/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
@@ -113,7 +113,7 @@ ready-to-apply.
 ### 1. Configure
 
 ```bash
-git clone https://github.com/VaddiMaithresh-16/CareerOS-Pro.git
+git clone https://github.com/MaithreshVaddi-27/CareerOS-Pro.git
 cd CareerOS-Pro
 cp .env.example .env
 ```

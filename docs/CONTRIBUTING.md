@@ -3,7 +3,7 @@
 ## Setup
 
 ```bash
-git clone https://github.com/VaddiMaithresh-16/CareerOS-Pro.git
+git clone https://github.com/MaithreshVaddi-27/CareerOS-Pro.git
 cd CareerOS-Pro
 python -m venv backend/venv && source backend/venv/bin/activate
 pip install -r requirements.txt
