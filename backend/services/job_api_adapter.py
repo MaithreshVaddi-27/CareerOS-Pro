@@ -417,69 +417,69 @@ def get_adapter() -> JobSourceAdapter:
 class _CompanyScraperAdapter:
     """Adapter wrapping the company career page scraper.
 
-    This is a free, no-credential-required source that scrapes company career pages.
-    It's intentionally placed after the key-required sources so it's used when
-    no other sources have valid credentials, but can also be combined with them.
+    Free and credential-free, so it can be combined with the keyed sources.
+    It only fires when the query actually names a company - see
+    ``_infer_company_names_from_query`` for why that matters.
     """
 
     async def search(self, query: str, location: str | None = None) -> list[RawJobPosting]:
-        # Try to infer company from query, or use general search
-        # For now, try a few common company career page patterns
-        results = []
+        """Scrape career pages of companies named in the query.
 
-        # Extract potential company name from query (first word capitalized)
-        query_words = query.strip().split()
-        if query_words:
-            potential_company = query_words[0].rstrip(",;:")
-            # Scrape career pages for this company
-            company_results = await scrape_company_jobs(
-                company_name=potential_company,
-                location=location,
-            )
-            results.extend(company_results)
+        Scraping is best-effort enrichment: a query naming no company returns
+        nothing rather than inventing a source to scrape.
+        """
+        explicit = re.match(r"^\s*company\s*:\s*(.+)$", query, re.I)
+        candidates = (
+            [explicit.group(1).strip()]
+            if explicit
+            else await _infer_company_names_from_query(query)
+        )
+        if not candidates:
+            logger.info("No company named in query %r - nothing to scrape", query)
+            return []
 
-        # If no results from company scraping, try a generic approach
-        if not results:
-            # Try scraping some known company career pages
-            company_names = await _infer_company_names_from_query(query)
-            # Scrape multiple companies concurrently with limited concurrency
-            semaphore = asyncio.Semaphore(settings.company_scraper_max_concurrency)
-            async def _scrape_one(company_name: str) -> list[RawJobPosting]:
-                async with semaphore:
-                    return await scrape_company_jobs(
-                        company_name=company_name,
-                        location=location,
-                    )
-            tasks = [_scrape_one(name) for name in company_names]
-            company_results = await asyncio.gather(*tasks, return_exceptions=True)
-            for company_result in company_results:
-                if not isinstance(company_result, Exception):
-                    results.extend(company_result)
-            # Fallback: scrape a short list of popular companies sequentially if no matches
-            if not results:
-                for company in ["Google", "Microsoft", "Apple", "Amazon", "Meta"]:
-                    try:
-                        company_results = await scrape_company_jobs(
-                            company_name=company,
-                            location=location,
-                        )
-                        results.extend(company_results)
-                    except Exception as e:
-                        logger.warning("Company scrape failed for %s: %s", company, e)
-                        continue
+        semaphore = asyncio.Semaphore(settings.company_scraper_max_concurrency)
 
+        async def _scrape_one(company_name: str) -> list[RawJobPosting]:
+            async with semaphore:
+                return await scrape_company_jobs(
+                    company_name=company_name,
+                    location=location,
+                )
+
+        scraped = await asyncio.gather(
+            *(_scrape_one(name) for name in candidates), return_exceptions=True
+        )
+
+        results: list[RawJobPosting] = []
+        for company_result in scraped:
+            if isinstance(company_result, BaseException):
+                logger.warning("Company scrape failed: %s", company_result)
+                continue
+            results.extend(company_result)
         return results
 
 
 async def _infer_company_names_from_query(query: str) -> list[str]:
-    """Very light heuristic to pull potential company names from a search query."""
-    # Split on common separators and capitalize each token
-    raw_tokens = re.split(r"[\s_,;]+", query.lower())
-    # Simple heuristic: words that look like proper nouns (first letter upper)
-    candidates = [tok.capitalize() for tok in raw_tokens if tok and tok[0].isalpha()]
-    # Filter out very common non-company tokens
+    """Pull company names out of a search query.
+
+    Only proper nouns qualify: a token capitalised in the original query.
+    Capitalising lowercase tokens instead would read "python developer" as two
+    companies and fire HTTP requests at python.com and developer.com.
+    ``company:<name>`` is the explicit escape hatch for lowercase names.
+    """
     stop_words = {
         "remote", "full", "part", "time", "intern", "contract", "jobs", "job",
-        "hiring", "careers", "career", "employment", "position", "vacancy"
+        "hiring", "careers", "career", "employment", "position", "vacancy",
+        "engineer", "developer", "manager", "analyst", "designer",
+        "senior", "junior", "lead", "the", "and", "for", "with", "a", "an",
     }
-    return [cand for cand in candidates if cand not in stop_words][:5]
+    candidates: list[str] = []
+    for token in re.split(r"[\s_,;]+", query):
+        token = token.strip("()[]{}\"'.,")
+        if len(token) < 2 or not token.isalpha() or not token.istitle():
+            continue
+        if token.lower() in stop_words or token in candidates:
+            continue
+        candidates.append(token)
+    return candidates[:5]

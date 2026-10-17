@@ -11,6 +11,7 @@ for local dev (APP_ENV=development), since that's dev-only by
 definition and doesn't need to survive a restart.
 """
 
+import asyncio
 from typing import TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -31,6 +32,10 @@ from backend.services.vector_store import get_client, index_job, semantic_search
 
 settings = get_settings()
 _checkpointer_singleton: dict = {}
+
+# Fan-out cap for per-job LLM explanations. High enough to hide provider
+# latency, low enough not to trip provider rate limits on a large top_k.
+_EXPLAIN_CONCURRENCY = 5
 
 
 def _mysql_dsn() -> str:
@@ -147,11 +152,32 @@ async def _evidence_and_explain(state: CareerOSState, db: Session) -> CareerOSSt
         model_name=req.model_name,
     )
 
-    for entry in state["ranked"]:
+    async def _explain_one(entry: dict) -> tuple[dict, object]:
+        # db.get is synchronous and completes before the await, so the shared
+        # Session is never touched across a suspension point.
         job = db.get(Job, entry["job_id"])
         if not job:
+            return entry, None
+        return entry, await router.explain_match(
+            job.title, job.description, req.candidate_skills
+        )
+
+    semaphore = asyncio.Semaphore(_EXPLAIN_CONCURRENCY)
+
+    async def _explain_limited(entry: dict) -> tuple[dict, object]:
+        async with semaphore:
+            return await _explain_one(entry)
+
+    # Bounded fan-out: one LLM round-trip per job, but in parallel. A serial
+    # loop here made /jobs/match latency O(top_k x provider latency).
+    explained = await asyncio.gather(
+        *(_explain_limited(entry) for entry in state["ranked"])
+    )
+
+    for entry, explanation in explained:
+        if explanation is None:
             continue
-        explanation = await router.explain_match(job.title, job.description, req.candidate_skills)
+        entry["evidence"] = explanation.evidence
         entry["matched_skills"] = explanation.matched_skills
         entry["missing_skills"] = explanation.missing_skills
         entry["explanation"] = explanation.explanation

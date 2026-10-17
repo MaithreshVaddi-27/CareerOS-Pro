@@ -242,6 +242,7 @@ async def match_jobs(req: MatchRequest, db: Session = Depends(get_db)):
                 keyword_score=entry["keyword_score"],
                 semantic_score=entry["semantic_score"],
                 hybrid_score=entry["hybrid_score"],
+                evidence=entry.get("evidence", ""),
                 matched_skills=entry.get("matched_skills", []),
                 missing_skills=entry.get("missing_skills", []),
                 explanation=entry.get("explanation", "unknown"),

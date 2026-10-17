@@ -22,10 +22,93 @@ settings = get_settings()
 
 
 class MatchExplanation(BaseModel):
+    # Skills the model quoted verbatim from the JD. Carried through so a
+    # reviewer can audit an answer without re-reading the posting.
+    evidence: str = ""
     matched_skills: list[str] = []
     missing_skills: list[str] = []
     explanation: str = "unknown"
     confidence: float = 0.0
+
+
+# ---------------------------------------------------------------------------
+# Prompting
+# ---------------------------------------------------------------------------
+
+# Bound the JD so one pathological posting cannot blow up latency/cost.
+_MAX_JD_CHARS = 1200
+_MAX_SKILLS = 40
+
+_SYSTEM_CONTRACT = (
+    "You are a resume-evidence extractor. Reply with JSON only, no prose, no code fences. "
+    "Every claim must be traceable to a literal span in the supplied JD. "
+    "If the JD does not state a skill, it is absent - never infer from the job title alone, "
+    "never assume seniority, and never invent experience."
+)
+
+
+def _toon_block(job_title: str, description: str, skills: list[str]) -> str:
+    """Serialize the request in TOON (Token-Oriented Object Notation).
+
+    ``key::value`` for scalars, ``key[n]`` with a pipe-delimited run for lists.
+    For n items this costs roughly one delimiter per item instead of JSON's
+    per-item quoting and braces - a real saving when this block ships with
+    every job in a ranked batch.
+    """
+    trimmed = [s.strip() for s in skills[:_MAX_SKILLS] if s and s.strip()]
+    # Collapse newlines so the JD cannot forge a fake TOON header.
+    desc = " ".join(description[:_MAX_JD_CHARS].split())
+    lines = [
+        "## REQUEST",
+        f"job.title:: {job_title.strip()}",
+        f"job.description:: {desc}",
+        f"candidate.skills[{len(trimmed)}]:: {'|'.join(trimmed)}",
+    ]
+    return "\n".join(lines)
+
+
+def _build_match_prompt(job_title: str, description: str, candidate_skills: list[str]) -> str:
+    """CRAFT-structured prompt: Context, Role, Action, Format, Tone.
+
+    CRAFT over a flat instruction dump buys two things that matter here: the
+    Role/Context pair suppresses the one failure that matters (hallucinated
+    skills, which spec 2.3 forbids), and the explicit Format block with a worked
+    example pins the JSON shape for small local models that otherwise drift.
+    """
+    return f"""{_SYSTEM_CONTRACT}
+
+# ROLE
+You assess candidate-to-job fit from resume evidence only.
+
+# CONTEXT
+{_toon_block(job_title, description, candidate_skills)}
+
+# ACTION
+Work in this order, briefly, before answering:
+1. Scan `job.description` for skills. Record only skills you can point at.
+2. Split those into `matched` (also in candidate.skills) and `missing`.
+3. Re-check every entry against its source span. Drop anything you cannot source.
+4. Score confidence from evidence volume, not from how well the title matches.
+
+# FORMAT
+Emit exactly one JSON object, no surrounding text:
+{{"evidence":"<skills you literally found in the JD, pipe-separated>",
+  "matched_skills":["..."],"missing_skills":["..."],
+  "explanation":"<1-2 sentences>","confidence":<0.0-1.0>}}
+
+Rules:
+- matched_skills MUST be a subset of candidate.skills.
+- missing_skills MUST come from job.description, never from general knowledge.
+- confidence < 0.5 when the JD is thin or ambiguous.
+- Empty list is the correct answer when the JD names no skills.
+
+Worked example:
+JD mentions "Kubernetes" and "Go"; candidate has Go but not Kubernetes.
+-> evidence: "go|kubernetes", matched_skills: ["Go"],
+   missing_skills: ["Kubernetes"], confidence: 0.8
+
+# TONE
+Clinical and terse. No hedging adjectives, no encouragement, no career advice."""
 
 
 class LLMProvider(Protocol):
@@ -177,14 +260,9 @@ class ModelRouter:
             raise
 
     async def explain_match(self, job_title: str, job_description: str, candidate_skills: list[str]) -> MatchExplanation:
-        prompt = (
-            "Candidate skills: " + ", ".join(candidate_skills) + "\n"
-            f"Job title: {job_title}\nJob description: {job_description}\n\n"
-            "Return JSON with: matched_skills (subset of candidate skills present in the JD), "
-            "missing_skills (JD-required skills the candidate lacks), explanation (1-2 sentences, "
-            "grounded only in the text above — never invent skills or experience not stated), "
-            "confidence (0-1)."
-        )
+        # Built once and reused across every provider attempt, so routing and
+        # fallback cannot change what the model is being asked.
+        prompt = _build_match_prompt(job_title, job_description, candidate_skills)
 
         # If explicit provider mode (not auto), use only that provider
         if self._provider_mode != "auto":

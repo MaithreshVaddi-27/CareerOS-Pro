@@ -98,6 +98,7 @@ class MatchedJobOut(BaseModel):
     keyword_score: float
     semantic_score: float
     hybrid_score: float
+    evidence: str = ""  # skills quoted verbatim from the JD, for auditing
     matched_skills: list[str]
     missing_skills: list[str]
     explanation: str

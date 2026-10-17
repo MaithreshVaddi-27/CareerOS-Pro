@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-# Module-level settings (backend/config.py calls get_settings() at *import*
+# Module-level settings (backend/core/config.py calls get_settings() at *import*
 # time in several modules) need these env vars before pytest even collects
 # the test files - an autouse fixture alone runs too late and every test
 # module fails to import with a pydantic ValidationError.

@@ -1,4 +1,4 @@
-"""Tests for deduplication functions."""
+"""Tests for job upsert / deduplication against the database."""
 
 from unittest.mock import Mock, patch
 
@@ -7,49 +7,6 @@ from sqlalchemy.orm import Session
 from backend.models import Job
 from backend.schemas import RawJobPosting
 from backend.services.dedup import upsert_job
-from backend.services.normalize import hash_content, hash_url
-
-
-def test_hash_url():
-    # Test that equivalent URLs produce same hash (query params are stripped)
-    url1 = "https://example.com/job?utm_source=test&ref=home"
-    url2 = "https://example.com/job?ref=home&utm_source=test"
-    url3 = "https://example.com/job"
-    url4 = "https://example.com/job/"  # with trailing slash
-
-    h1 = hash_url(url1)
-    h2 = hash_url(url2)
-    h3 = hash_url(url3)
-    h4 = hash_url(url4)
-
-    # All should produce the same hash because:
-    # - Query parameters are stripped entirely
-    # - Trailing slashes are stripped from path
-    # - Scheme and host are lowercased
-    assert h1 == h2  # Different query param order
-    assert h1 == h3  # With and without query params
-    assert h1 == h4  # With and without trailing slash
-    assert len(h1) == 64  # SHA256 length
-
-    # Test that different paths produce different hashes
-    url5 = "https://example.com/different"
-    h5 = hash_url(url5)
-    assert h1 != h5  # Different path should produce different hash
-
-
-def test_hash_content():
-    # Test that equivalent content produces same hash
-    content1 = ("Software Engineer", "Acme Corp", "New York")
-    content2 = ("software engineer", "acme corp", "new york")
-    content3 = ("Software Engineer", "Different Corp", "New York")
-
-    h1 = hash_content(*content1)
-    h2 = hash_content(*content2)
-    h3 = hash_content(*content3)
-
-    assert h1 == h2  # Case insensitive
-    assert h1 != h3  # Different company
-    assert len(h1) == 64  # SHA256 length
 
 
 def test_upsert_job_deduplication():

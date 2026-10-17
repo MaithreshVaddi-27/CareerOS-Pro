@@ -18,18 +18,33 @@ def test_normalize_url():
     assert normalize_url("https://user:pass@example.com/path") == "https://example.com/path"
 
 
+
+
 def test_hash_url():
-    h1 = hash_url("https://example.com/job")
-    h2 = hash_url("https://example.com/job?utm_source=test")
-    assert h1 == h2  # should be same after normalization
-    assert len(h1) == 64  # sha256 hex length
+    # Equivalent URLs must collapse to one hash: query strings and trailing
+    # slashes are noise, but a different path is a different job.
+    variants = [
+        "https://example.com/job",
+        "https://example.com/job/",
+        "https://example.com/job?utm_source=test&ref=home",
+        "https://example.com/job?ref=home&utm_source=test",
+    ]
+    hashes = {hash_url(u) for u in variants}
+    assert len(hashes) == 1
+    assert len(hashes.pop()) == 64  # sha256 hex
+    assert hash_url("https://example.com/different") != hash_url(
+        "https://example.com/job"
+    )
 
 
 def test_hash_content():
-    h1 = hash_content("Software Engineer", "Acme Corp", "New York")
-    h2 = hash_content("software engineer", "acme corp", "new york")
-    assert h1 == h2  # case insensitive
-    assert len(h1) == 64
+    assert hash_content("Software Engineer", "Acme Corp", "New York") == hash_content(
+        "software engineer", "acme corp", "new york"
+    )  # case insensitive
+    assert hash_content("Software Engineer", "Acme", "NY") != hash_content(
+        "Software Engineer", "Different Corp", "NY"
+    )
+    assert len(hash_content("a", "b", "c")) == 64
 
 
 def test_parse_location():

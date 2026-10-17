@@ -19,9 +19,12 @@ _EMPLOYMENT_MAP = {
     "part time": "part_time",
     "internship": "internship",
     "intern": "internship",
+    "contract-to-hire": "contract",
+    "contract to hire": "contract",
     "contract": "contract",
     "contractor": "contract",
     "temporary": "temporary",
+    "temp": "temporary",
 }
 
 # order matters — checked top to bottom, first match wins
@@ -106,7 +109,11 @@ def parse_location(location_raw: str) -> tuple[str, str]:
         remote = "onsite"
     else:
         remote = "unknown"
-    normalized = re.sub(r"\s+", " ", location_raw).strip().title() or "unknown"
+    # Collapse whitespace only. Do NOT .title() the value: it destroys
+    # acronyms and proper nouns ("NY" -> "Ny", "AWS" -> "Aws"). Location
+    # matching in filters.py lowercases both sides, so preserving the source
+    # casing costs nothing and keeps the stored value honest (spec 2.3).
+    normalized = re.sub(r"\s+", " ", location_raw).strip() or "unknown"
     return normalized, remote
 
 
