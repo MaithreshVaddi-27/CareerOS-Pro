@@ -78,6 +78,11 @@ class SearchRequest(BaseModel):
     llm_provider: Optional[str] = None  # "auto" | "llama" | "gemini" | "openrouter" | "nvidia" | "none"
     model_name: Optional[str] = None
 
+    # Pagination. Capped so one request can never pull an unbounded result set.
+    # There is no total count in the response — the list is simply this page.
+    limit: int = Field(default=50, ge=1, le=200)
+    offset: int = Field(default=0, ge=0)
+
 
 class MatchRequest(BaseModel):
     query: str
@@ -88,7 +93,12 @@ class MatchRequest(BaseModel):
     remote_only: bool = False
     min_salary: Optional[float] = None
     posted_within_days: Optional[int] = None
-    top_k: int = 10
+    # top_k is the page size. It was previously unbounded, which made it both a
+    # `LIMIT -n` on negative input and an unbounded row pull on large input.
+    top_k: int = Field(default=10, ge=1, le=100)
+    # Skip this many eligible candidates before ranking. Lets a caller walk past
+    # the first page of an unranked-by-score ordering without re-sending filters.
+    offset: int = Field(default=0, ge=0)
     llm_provider: Optional[str] = None  # "auto" | "llama" | "gemini" | "openrouter" | "nvidia" | "none"
     model_name: Optional[str] = None
 

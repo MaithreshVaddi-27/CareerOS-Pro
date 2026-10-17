@@ -1,7 +1,10 @@
 # Environments
+# Catch EVERY .env variant, not just .env and .env.local: .env.production and
+# .env.staging were not ignored and would have been committed with live
+# credentials. .env.example is the one that must stay tracked.
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 .venv/
 venv/
 env/
@@ -52,7 +55,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 
-# Pytest / Coverage
+# Pytest / Coverage / Linters
 .pytest_cache/
 .tox/
 .coverage
@@ -63,6 +66,8 @@ coverage.xml
 *.cover
 *.py,cover
 .hypothesis/
+htmlcov/
+.ruff_cache/
 
 # Databases & Vector Stores
 *.db
@@ -71,6 +76,10 @@ careeros_dev.db
 qdrant_local/
 
 # IDEs, Editors, and OS
+# Agent/tool scratch state. These ship their own nested .gitignore, so they only
+# self-ignore once the tool has run at least once — list them here so a fresh
+# clone or a first run before that self-ignore exists is still safe.
+.remember/
 .vscode/
 .idea/
 *.swp

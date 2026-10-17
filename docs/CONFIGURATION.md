@@ -209,6 +209,28 @@ default shortlist.
 
 ---
 
+## Job retention (no environment variables)
+
+Retention is configured on the command line, not through `.env`, so there is no
+restart-required knob to get wrong.
+
+```bash
+python -m backend.retention --days 90            # dry run: reports the count only
+python -m backend.retention --days 90 --yes      # deletes, in bounded batches
+```
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--days` | `90` | Inactive for at least this long. |
+| `--batch-size` | `1000` | Max rows per run, so one run cannot take a long lock. |
+| `--yes` | off | Without it the run deletes nothing. |
+
+Rows are keyed on `updated_at`, which the `is_active` flip itself bumps — retention
+measures staleness, not age, so a freshly-refreshed posting is never expired early.
+Rows still active are never eligible at any age.
+
+---
+
 ## Interaction notes
 
 **Settings are cached.** `get_settings()` is `@lru_cache`d and called at module scope
@@ -241,6 +263,9 @@ runs in CI. Never edit a revision that has been applied anywhere — add a new o
 - [ ] `ALLOWED_ORIGINS` lists only real frontend origins
 - [ ] MySQL is 8.x, not 9.x — or `CHECKPOINT_STRICT=true` so a checkpoint
       failure is a refusal to start rather than silent data loss
-- [ ] `.env` is not committed — it is gitignored
+- [ ] `.env` is not committed — it is gitignored (`.env.*` is ignored, so
+      `.env.production` and `.env.staging` are covered too; `.env.example` is not)
 - [ ] `COMPANY_SCRAPER_USER_AGENT` identifies you with a contact URL
 - [ ] `alembic upgrade head` has been run against the deployed database
+- [ ] A recurring `python -m backend.retention --days N --yes` job is scheduled, so
+      `is_active = false` rows do not accumulate without bound

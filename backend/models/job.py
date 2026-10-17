@@ -3,7 +3,7 @@
 import datetime as dt
 import uuid
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.core.db import Base
@@ -20,6 +20,10 @@ def _uuid() -> str:
 class Job(Base):
     __tablename__ = "jobs"
 
+    # Every read path filters is_active and orders by posted_at, so they lead a
+    # composite index: it serves both the predicate and the sort.
+    __table_args__ = (Index("ix_jobs_is_active_posted_at", "is_active", "posted_at"),)
+
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
 
     # identity / dedup
@@ -27,21 +31,24 @@ class Job(Base):
     content_hash: Mapped[str] = mapped_column(String(64), index=True)
 
     # raw + normalized fields
-    source: Mapped[str] = mapped_column(String(64))  # e.g. "jsearch"
+    source: Mapped[str] = mapped_column(String(64), index=True)  # e.g. "jsearch"
     source_id: Mapped[str] = mapped_column(String(512), index=True)
     title: Mapped[str] = mapped_column(String(512))
     company: Mapped[str] = mapped_column(String(256))
     location_raw: Mapped[str] = mapped_column(String(512), default="")
     location_normalized: Mapped[str] = mapped_column(String(256), default="unknown")
-    employment_type: Mapped[str] = mapped_column(String(64), default="unknown")
-    experience_level: Mapped[str] = mapped_column(String(32), default="unknown")  # intern/fresher/no_experience/entry/mid/senior/unknown
-    remote: Mapped[str] = mapped_column(String(32), default="unknown")  # remote/onsite/hybrid/unknown
+    # Indexed because these are equality filters in build_sql_filters. title and
+    # location_normalized are not: they are only ever matched with a leading
+    # wildcard, which no B-tree can serve.
+    employment_type: Mapped[str] = mapped_column(String(64), default="unknown", index=True)
+    experience_level: Mapped[str] = mapped_column(String(32), default="unknown", index=True)  # intern/fresher/no_experience/entry/mid/senior/unknown
+    remote: Mapped[str] = mapped_column(String(32), default="unknown", index=True)  # remote/onsite/hybrid/unknown
 
     description: Mapped[str] = mapped_column(Text, default="")
     skills_required: Mapped[list] = mapped_column(JSON, default=list)
 
     salary_min: Mapped[float | None] = mapped_column(Float, nullable=True)
-    salary_max: Mapped[float | None] = mapped_column(Float, nullable=True)
+    salary_max: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
     salary_currency: Mapped[str] = mapped_column(String(8), default="unknown")
 
     apply_url: Mapped[str] = mapped_column(String(1024))

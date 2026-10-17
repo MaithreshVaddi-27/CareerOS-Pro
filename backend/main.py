@@ -2,7 +2,7 @@
 
 import contextlib
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,7 +20,7 @@ from backend.core.middleware import (
 from backend.models import Job
 from backend.schemas import JobOut, MatchedJobOut, MatchRequest, SearchRequest
 from backend.services.dedup import upsert_job
-from backend.services.filters import apply_hard_filters
+from backend.services.filters import apply_hard_filters, build_sql_filters
 from backend.services.job_api_adapter import get_adapter
 from backend.services.normalize import normalize_job
 
@@ -184,47 +184,17 @@ async def search_jobs(req: SearchRequest, db: Session = Depends(get_db)):
             db.rollback()
             logger.exception("skipping job source=%s source_id=%s (insert failed)", raw.source, raw.source_id)
 
-    # Build base query with filters that can be applied at the database level
-    query = select(Job).where(Job.is_active == True)  # noqa: E712 — SQLAlchemy column comparison, not a Python bool check
+    # Filter in SQL, then apply the authoritative Python predicate over the
+    # result. build_sql_filters is a superset, so this is a narrowing second pass.
+    # Previously this hand-rolled the same clauses, duplicating filter logic.
+    candidate_jobs = db.execute(
+        select(Job)
+        .where(*build_sql_filters(req))
+        .order_by(Job.posted_at.desc().nullslast(), Job.created_at.desc())
+        .offset(req.offset)
+        .limit(req.limit)
+    ).scalars().all()
 
-    # Apply employment type filter if specified
-    if req.employment_type and req.employment_type != "unknown":
-        query = query.where(Job.employment_type == req.employment_type)
-
-    # Apply experience level filter if specified
-    if req.experience_level and req.experience_level != "unknown":
-        query = query.where(Job.experience_level == req.experience_level)
-
-    # Apply remote only filter if specified
-    if req.remote_only:
-        query = query.where(Job.remote == "remote")
-
-    # Apply source filter if specified (e.g. only "company" or only paid-API sources)
-    if req.sources:
-        query = query.where(Job.source.in_(req.sources))
-
-    # Apply minimum salary filter if specified
-    if req.min_salary is not None:
-        # Only exclude jobs where we know the max salary is less than required
-        # Unknown salaries are not excluded (spec 2.3)
-        query = query.where(
-            (Job.salary_max.is_(None)) | (Job.salary_max >= req.min_salary)
-        )
-
-    # Apply posted within days filter if specified
-    if req.posted_within_days is not None:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=req.posted_within_days)
-        # Only exclude jobs where we know the posted date is before cutoff
-        # Unknown dates are not excluded (spec 2.3)
-        query = query.where(
-            (Job.posted_at.is_(None)) | (Job.posted_at >= cutoff)
-        )
-
-    # Execute the query to get candidate jobs
-    candidate_jobs = db.execute(query).scalars().all()
-
-    # Apply remaining filters (location and query string) in Python
-    # These are more complex to do efficiently in SQL with our current implementation
     filtered = apply_hard_filters(candidate_jobs, req)
     return filtered
 
@@ -276,7 +246,6 @@ async def match_jobs(req: MatchRequest, db: Session = Depends(get_db)):
 async def verify_job(job_id: str, db: Session = Depends(get_db)):
     """Firecrawl-backed verification pass. Sets verified=True only on a positive
     confirmed result — reachability alone is not enough (spec 2.3: never guess)."""
-    from datetime import datetime, timezone
 
     from fastapi import HTTPException
 

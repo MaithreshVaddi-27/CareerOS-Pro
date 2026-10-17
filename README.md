@@ -189,6 +189,28 @@ You should get a ranked list with `evidence`, `matched_skills`, `missing_skills`
 and a `confidence` per job. With no API keys configured it still runs — every
 provider returns a graceful "no LLM available" explanation rather than failing.
 
+### Housekeeping — pruning inactive jobs
+
+When a posting disappears upstream its row is marked `is_active = false` rather
+than deleted, so `jobs` only ever grows. Prune those rows on a schedule:
+
+```bash
+# Report only — this is the default and changes nothing.
+python -m backend.retention --days 90
+
+# Delete, in bounded batches so a single run cannot take a long lock.
+python -m backend.retention --days 90 --yes
+```
+
+Retention is keyed on `updated_at`, which the `is_active` flip itself bumps — so it
+measures staleness, not age, and a freshly-refreshed posting is never expired early.
+Each run deletes at most `--batch-size` rows (default 1000); re-run until it reports
+nothing left. Schedule it with cron, e.g. daily at 03:17:
+
+```cron
+17 3 * * * cd /srv/careeros && backend/venv/bin/python -m backend.retention --days 90 --yes
+```
+
 ---
 
 ## Configuration
@@ -241,10 +263,16 @@ All routes except `/health*` require the `X-API-Key` header.
   "remote_only": false,
   "min_salary": 0,
   "posted_within_days": 30,
-  "sources": ["jsearch", "company"] // optional; defaults to JOB_SOURCES
+  "sources": ["jsearch", "company"], // optional; defaults to JOB_SOURCES
+  "limit": 50,                       // 1..200, default 50
+  "offset": 0                        // default 0
 }
-// → [ JobOut, … ]
+// → [ JobOut, … ]   (at most `limit` rows)
 ```
+
+Filtering happens in SQL against indexed columns, and `/jobs/match` no longer loads
+the whole table. `limit`/`offset` cap how many rows come back; the response shape is
+unchanged, so an empty page just means you paged past the end.
 
 **`POST /jobs/match`**
 
@@ -253,8 +281,9 @@ All routes except `/health*` require the `X-API-Key` header.
 {
   "query": "python",
   "candidate_skills": ["Python", "FastAPI", "PostgreSQL"],
-  "top_k": 10,
-  "llm_provider": "auto"   // auto | llama | gemini | openrouter | nvidia | none
+  "top_k": 10,                 // page size, 1..100
+  "offset": 0,                 // default 0
+  "llm_provider": "auto"       // auto | llama | gemini | openrouter | nvidia | none
 }
 // → [ MatchedJobOut, … ]
 ```
@@ -287,7 +316,7 @@ Full reference with error shapes: **[docs/API.md](docs/API.md)**.
 backend/
 ├── core/            cross-cutting concerns
 │   ├── config.py    env-driven Settings, lru_cached
-│   ├── db.py        engine, SessionLocal, Base, schema sync
+│   ├── db.py        engine, SessionLocal, Base (schema comes from Alembic)
 │   ├── middleware.py  request-id, security headers, rate limit, API-key auth
 │   └── monitoring.py  AgentMonitor — per-agent latency/failure stats
 ├── models/          SQLAlchemy ORM (Job)
@@ -297,7 +326,7 @@ backend/
 │   ├── job_api_adapter.py  source adapters + fan-out
 │   ├── normalize.py        deterministic parsing
 │   ├── dedup.py            upsert by hash
-│   ├── filters.py          hard filters
+│   ├── filters.py          hard filters (SQL prefilter + authoritative Python pass)
 │   ├── vector_store.py     Qdrant + fallback
 │   ├── reranker.py         hybrid scoring
 │   ├── model_router.py     LLM providers + grounded prompting
@@ -306,6 +335,7 @@ backend/
 ├── graph.py         LangGraph orchestration (no business logic)
 ├── main.py          FastAPI app + routes
 ├── cli.py           scrape a single company to JSON
+├── retention.py     bounded pruning of inactive jobs
 └── run.py           entrypoint
 ```
 
@@ -437,13 +467,16 @@ Workflow, conventions and the review checklist: **[docs/CONTRIBUTING.md](docs/CO
 Active development. Honest summary of where it stands:
 
 **Working and tested** — multi-source aggregation, deterministic normalization and
-dedup, hard filtering, hybrid ranking, grounded LLM explanation, career-page
-scraping, liveness verification, health and agent monitoring, CI.
+dedup, SQL-side hard filtering over indexed columns, bounded candidate retrieval,
+hybrid ranking, grounded LLM explanation, career-page scraping, liveness verification,
+health and agent monitoring, CI.
 
-**Known limitations** — every `/jobs/match` request loads the whole `jobs` table and
-filters in Python; there is no pagination; the vector store falls back to a local
-in-process implementation; the human-review interrupt is wired but the resume path is not
-yet exposed over HTTP.
+**Known limitations** — `location` is matched with SQL `LIKE`, so short codes like
+`in` or `ny` can over-match in the database pass (`LIKE '%in%'` also hits "kingdom");
+the authoritative Python pass then rejects those rows, so results stay correct at a
+small cost in rows read. The vector store falls back to a local in-process
+implementation; the human-review interrupt is wired but the resume path is not yet
+exposed over HTTP. Inactive rows accumulate between retention runs.
 
 These are tracked with severity and remediation cost in
 **[docs/AUDIT.md](docs/AUDIT.md)**.

@@ -207,6 +207,35 @@ python -m backend.cli "Acme Corp" --max-concurrency 2 --jitter-max 0.2
 | `--max-concurrency` | from config | Per-domain request cap |
 | `--jitter-max` | from config | Retry jitter ceiling |
 
+### Job retention
+
+A posting that disappears upstream is marked `is_active = false`, not deleted, so the
+`jobs` table only ever grows. Prune those rows on a schedule:
+
+```bash
+python -m backend.retention --days 90            # dry run — reports, deletes nothing
+python -m backend.retention --days 90 --yes      # delete in bounded batches
+```
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--days` | `90` | Inactive for at least this long |
+| `--batch-size` | `1000` | Max rows deleted per run |
+| `--yes` | off | Without it, nothing is deleted |
+
+Each run deletes at most `--batch-size` rows, so the transaction stays short even on a
+badly overgrown table — re-run until it reports nothing left. Eligibility is keyed on
+`updated_at` (which the deactivation itself bumps), so a freshly-refreshed posting is
+never expired early, and active rows are never eligible at any age.
+
+Schedule it alongside your other jobs, e.g. daily at 03:17:
+
+```cron
+17 3 * * * cd /srv/careeros && backend/venv/bin/python -m backend.retention --days 90 --yes
+```
+
+Both commands must run from the repo root with the backend virtualenv active.
+
 ---
 
 ## Troubleshooting

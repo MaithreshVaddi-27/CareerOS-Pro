@@ -110,8 +110,12 @@ Authenticated. Fan out to every configured source, normalize, dedup, hard-filter
 | `min_salary` | float | `null` | |
 | `posted_within_days` | int | `null` | |
 | `sources` | string[] | `null` | Overrides `JOB_SOURCES` for this request. |
+| `limit` | int | `50` | Page size, `1`–`200`. |
+| `offset` | int | `0` | Rows to skip. |
 
-**Response** — `JobOut[]`
+**Response** — `JobOut[]`, ordered by `posted_at` descending (nulls last), then
+`created_at` descending. At most `limit` rows; no total count is returned, so an
+empty array means either no match or that you paged past the end.
 
 ```jsonc
 {
@@ -153,7 +157,8 @@ explanation.
 |---|---|---|---|
 | `query` | string | **required** | |
 | `candidate_skills` | string[] | `[]` | The model may only match from this list. |
-| `top_k` | int | `10` | |
+| `top_k` | int | `10` | Page size, `1`–`100`. Was unbounded before Phase 2. |
+| `offset` | int | `0` | Candidates to skip before ranking. |
 | `location`, `employment_type`, `experience_level`, `remote_only`, `min_salary`, `posted_within_days` | | `null`/`false` | Same semantics as `/jobs/search`. |
 | `llm_provider` | string | `null` | `auto` \| `llama` \| `gemini` \| `openrouter` \| `nvidia` \| `none` |
 | `model_name` | string | `null` | |
@@ -225,8 +230,25 @@ FastAPI's default shape:
 
 ## Pagination and limits
 
-There is **no pagination**. `/jobs/search` and `/jobs/match` return the full filtered
-set. Both are bounded by `top_k` on the match path only.
+Both endpoints paginate:
 
-This is a known limitation for large result sets — see
-[AUDIT.md](AUDIT.md#a5-no-pagination).
+| Endpoint | Page size | Offset field |
+|---|---|---|
+| `/jobs/search` | `limit`, `1`–`200`, default `50` | `offset` |
+| `/jobs/match` | `top_k`, `1`–`100`, default `10` | `offset` |
+
+Filtering runs in SQL against indexed columns; the response is a bare array with no
+total count. Paging with a `limit` smaller than the filtered set is therefore the
+intended way to walk results.
+
+Filtering happens in two passes: a SQL prefilter that is guaranteed never to exclude a
+row the filter would otherwise keep, then the authoritative Python predicate. The SQL
+pass can over-match on short location codes (see below) but never under-match.
+
+> **Known imprecision.** `location` is matched in SQL with `LIKE`, which cannot express
+> the Python matcher's word-boundary rule. `location=in` therefore also matches
+> "london, united kingdom" at the SQL stage and `location=ny` matches "berlin, germany".
+> The Python pass rejects both, so results are correct — just with a few extra rows
+> read. The affected needles are enumerated in `tests/test_filters_sql.py`.
+
+See [AUDIT.md](AUDIT.md#a5-no-pagination) for the original finding.

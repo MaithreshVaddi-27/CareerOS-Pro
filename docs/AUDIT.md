@@ -139,7 +139,7 @@ Twelve findings fixed and regression-tested. Listed for traceability, not action
 
 ## Open findings
 
-### <a id="a4-full-table-scan-per-request"></a>A4 — Every match loads the whole jobs table · P1
+### <a id="a4-full-table-scan-per-request"></a>A4 — Every match loads the whole jobs table · P1 · ✅ FIXED (Phase 2)
 
 **Verified.** `graph.py:105`:
 
@@ -155,18 +155,23 @@ Python objects (`filters.py:150`), so none of the filtering is pushed to SQL.
 
 This is the single biggest scaling constraint in the system.
 
-**Fix.** Push the hard filters into the `WHERE` clause. `filters.py` is already
-written as per-row predicates, so this is mostly a matter of translating each to a SQL
-expression and indexing the columns that matter (`employment_type`,
-`experience_level`, `remote`, `salary_min`, `posted_at`, `location_normalized`).
-**M**.
+**Fix.** ~~Push the hard filters into the `WHERE` clause.~~ **DONE in Phase 2.**
+`filters.build_sql_filters()` emits a SQL superset of the per-row predicates, and
+migration `0002_filter_indexes` indexes `is_active`+`posted_at`, `source`,
+`employment_type`, `experience_level`, `remote` and `salary_max`.
 
-**Interim mitigation.** Prune `is_active = false` rows on a schedule, and keep
-retention bounded.
+Two notes on what was deliberately *not* done: `title` and `location_normalized` get
+no index, because they are only ever matched with a leading-wildcard `LIKE` that no
+B-tree can serve; and the SQL is a prefilter rather than a rewrite, because the
+Python matcher is the authority (see the Phase 2 section above). **M**.
+
+**Interim mitigation.** ~~Prune `is_active = false` rows on a schedule, and keep
+retention bounded.~~ **DONE in Phase 2** — `python -m backend.retention`, dry-run by
+default, bounded per run, keyed on `updated_at`.
 
 ---
 
-### <a id="a5-no-pagination"></a>A5 — No pagination · P2
+### <a id="a5-no-pagination"></a>A5 — No pagination · P2 · ✅ FIXED (Phase 2)
 
 **Verified.** Neither `/jobs/search` nor `/jobs/match` accepts a `limit`/`offset`.
 `/jobs/match` is bounded by `top_k` (default 10); `/jobs/search` is not bounded at
@@ -175,8 +180,11 @@ all.
 **Impact.** A broad query returns the entire matching set. Past a few thousand rows the
 response is both slow and impractical for a client to render.
 
-**Fix.** Add `limit`/`offset` (or cursor pagination) to `SearchRequest`, and an explicit
-cap on `/jobs/search`. **S**.
+**Fix.** ~~Add `limit`/`offset` (or cursor pagination) to `SearchRequest`, and an explicit
+cap on `/jobs/search`.~~ **DONE in Phase 2** — `SearchRequest` takes
+`limit` (1–200, default 50) and `offset`; `/jobs/match` reuses `top_k` as the page size
+and adds `offset`. Response shape is unchanged (still a bare list), so an empty page
+means you paged past the end. **S**.
 
 ---
 
@@ -349,13 +357,22 @@ Ordered by dependency and risk. Each step is independently shippable.
 | 2 | ~~Shared-store rate limiting via `REDIS_URL`~~ | A2 | **DONE** |
 | 3 | ~~Checkpoint type on `/health`; `CHECKPOINT_STRICT`~~ | A3 | **DONE** |
 
-### Phase 2 — Scale
+### Phase 2 — Scale ✅ **DONE**
 
 | # | Item | Fixes | Effort |
 |---|---|---|---|
-| 4 | Push hard filters into SQL; index the filtered columns | A4 | M |
-| 5 | `limit`/`offset` on `/jobs/search` and `/jobs/match` | A5 | S |
-| 6 | Bounded job retention; prune `is_active = false` rows | A4 | S |
+| 4 | ~~Push hard filters into SQL; index the filtered columns~~ | A4 | **DONE** |
+| 5 | ~~`limit`/`offset` on `/jobs/search` and `/jobs/match`~~ | A5 | **DONE** |
+| 6 | ~~Bounded job retention; prune `is_active = false` rows~~ | A4 | **DONE** |
+
+`build_sql_filters()` in `filters.py` is a **prefilter**, not a replacement: it is
+unit-tested to never exclude a row that `passes_hard_filters()` would keep, and the
+Python predicate still runs. It is a deliberate superset — `LIKE` cannot express the
+Python matcher's word-boundary rule, so `location=in` also matches "kingdom" in SQL
+and is then rejected in Python. Correctness is preserved; only a few extra rows are
+read. `tests/test_filters_sql.py` pins that invariant across a filter matrix, and
+declares the needles where an over-match is expected so a *new* divergence fails the
+build.
 
 ### Phase 3 — Quality
 

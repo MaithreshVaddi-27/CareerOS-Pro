@@ -23,7 +23,7 @@ from backend.core.config import get_settings
 from backend.models import Job
 from backend.schemas import MatchRequest, SearchRequest
 from backend.services.dedup import upsert_job
-from backend.services.filters import apply_hard_filters
+from backend.services.filters import apply_hard_filters, build_sql_filters
 from backend.services.job_api_adapter import get_adapter
 from backend.services.model_router import get_model_router_for_request
 from backend.services.normalize import normalize_job
@@ -41,6 +41,10 @@ _checkpoint_status: dict = {"kind": "unknown", "detail": "checkpointer not initi
 # Fan-out cap for per-job LLM explanations. High enough to hide provider
 # latency, low enough not to trip provider rate limits on a large top_k.
 _EXPLAIN_CONCURRENCY = 5
+
+# How many eligible candidates to pull per requested result. Ranking is cheap;
+# the expensive part is the per-job LLM explanation, which only runs on top_k.
+_CANDIDATE_OVERSAMPLE = 10
 
 
 def checkpoint_status() -> dict:
@@ -131,15 +135,23 @@ async def _discover_normalize_dedup_filter(state: CareerOSState, db: Session) ->
             client = get_client()
             index_job(client, row.id, row.title, row.description, row.skills_required or [])
 
-    all_jobs = db.execute(select(Job)).scalars().all()
-    filtered = apply_hard_filters(
-        all_jobs,
-        SearchRequest(
-            query=req.query, location=req.location, employment_type=req.employment_type,
-            experience_level=req.experience_level, remote_only=req.remote_only,
-            min_salary=req.min_salary, posted_within_days=req.posted_within_days,
-        ),
+    # Filter in SQL rather than loading every row: this used to be
+    # `select(Job)` + a Python pass over the whole table (audit A4). The Python
+    # predicate still runs over the (much smaller) SQL result, so it remains the
+    # authority and the SQL clauses only have to be a superset.
+    search_req = SearchRequest(
+        query=req.query, location=req.location, employment_type=req.employment_type,
+        experience_level=req.experience_level, remote_only=req.remote_only,
+        min_salary=req.min_salary, posted_within_days=req.posted_within_days,
     )
+    candidates = db.execute(
+        select(Job)
+        .where(*build_sql_filters(search_req))
+        .order_by(Job.posted_at.desc().nullslast(), Job.created_at.desc())
+        .offset(req.offset)
+        .limit(req.top_k * _CANDIDATE_OVERSAMPLE)
+    ).scalars().all()
+    filtered = apply_hard_filters(candidates, search_req)
     state["candidate_ids"] = [j.id for j in filtered]
     return state
 
