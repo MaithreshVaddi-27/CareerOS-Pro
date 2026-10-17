@@ -14,23 +14,26 @@ X-API-Key: <API_KEY>
 ```
 
 `API_KEY` has no default. With it unset the gate is **open** — intended for local
-development only. The app logs a warning at startup when it sees an API key configured
-alongside a production `APP_ENV` and a rate limit that is not clearly safe.
+development only.
 
-A missing or wrong key returns `403`.
+A missing or wrong key returns **401** with a message naming the header. The bundled
+frontend needs `VITE_API_KEY` set to the same value or it will 401 on every call.
 
 ---
 
 ## Rate limiting
 
-Fixed-window, per client IP, applied by `RateLimitMiddleware`. `/health` is exempt.
+Fixed-window, per client IP, applied by `RateLimitMiddleware`. `/health` is exempt
+(`/health/ready` is **not**).
 
 - Sustained limit: `RATE_LIMIT_PER_MINUTE` (default `60`)
 - Burst allowance: `2 ×` the per-minute limit within a 10-second window
-- Response: `429` with `Retry-After`
+- Response: `429` with `Retry-After: 60`
 
-State is **in-process**. See [AUDIT.md](AUDIT.md#a2-rate-limiting-is-per-process)
-before running multiple workers.
+Counters live in Redis when `REDIS_URL` is set, otherwise in-process. See
+[AUDIT.md](AUDIT.md#a2-rate-limiting-is-per-process) and
+[CONFIGURATION.md](CONFIGURATION.md#security-and-networking). `/health` reports which
+backend is active.
 
 ---
 
@@ -45,17 +48,28 @@ Unauthenticated. Component-by-component health.
 {
   "status": "healthy",          // healthy | degraded
   "checks": {
-    "database":         { "status": "ok", "detail": "MySQL connection successful" },
-    "rate_limit":       { "status": "ok", "detail": "rate_limit_per_minute=60" },
-    "embedding_model":  { "status": "ok", "detail": "..." },
-    "vector_store":     { "status": "ok", "detail": "Qdrant client initialized" }
+    "database":        { "status": "ok", "detail": "MySQL connection successful" },
+    "rate_limit":      { "status": "ok", "backend": "redis",
+                         "detail": "rate_limit_per_minute=60, backend=redis (shared)" },
+    "checkpoint":      { "status": "ok", "kind": "mysql",
+                         "detail": "AIOMySQLSaver (restart-durable)" },
+    "embedding_model": { "status": "ok", "detail": "HashingVectorizer embedding ready" },
+    "vector_store":    { "status": "ok", "detail": "Qdrant client initialized" }
   }
 }
 ```
 
-`status: "degraded"` means at least one component failed but the process is still
-serving. A failing component sets `checks.<name>.status = "degraded"`; note that
-`rate_limit` only ever reports `ok` or `configurable`, never `degraded`.
+`status: "degraded"` means at least one component is unhealthy but the process is
+still serving. Two components report degraded for reasons that matter:
+
+- **`rate_limit`** — degraded when `APP_ENV=production` and `REDIS_URL` is unset.
+  Per-process counters under-limit by the worker count.
+- **`checkpoint`** — degraded when the checkpointer silently fell back to in-memory,
+  i.e. checkpoints will not survive a restart. Set `CHECKPOINT_STRICT=true` in
+  production to refuse that fallback at startup instead.
+
+`checkpoint.kind` is one of `mysql`, `memory`, `unavailable`, or `unknown` before the
+first `/jobs/match` call resolves it.
 
 ## `GET /health/ready`
 
@@ -181,8 +195,10 @@ Ranking is deterministic and does not depend on the LLM.
 Authenticated. Confirms a posting is still live; sets `verified` / `verified_at` **only
 on a positive confirmed result**.
 
-Requires `FIRECRAWL_API_KEY`. Returns `422` when the key is missing. Reachability
-alone is not sufficient — the page must still look like the same posting.
+Requires a reachable `apply_url`. If `FIRECRAWL_API_KEY` is unset the posting is
+still reachability-checked but content is left unconfirmed, returning
+`verified: false` with that reason — **not** an error. Reachability alone is not
+sufficient to set `verified`, so the field stays `false`.
 
 Without a Firecrawl key, use `GET /jobs/{job_id}` and treat `verified: false` as
 "unverified", never as "dead".
@@ -194,12 +210,13 @@ Without a Firecrawl key, use `GET /jobs/{job_id}` and treat `verified: false` as
 FastAPI's default shape:
 
 ```jsonc
-{ "detail": "API key required" }              // 403
-{ "detail": "Job 0f3c… not found" }           // 404
-{ "detail": "FIRECRAWL_API_KEY is not configured" }  // 422
+{ "detail": "missing X-API-Key header — backend API_KEY is set, but this request sent none. …" }
+{ "detail": "invalid X-API-Key — value doesn't match backend API_KEY" }
+{ "detail": "job not found" }                                       // 404
+{ "detail": "rate limit exceeded, try again shortly" }             // 429 + Retry-After
 ```
 
-`422` also carries field-level validation errors when a request body is malformed.
+`422` appears only for malformed request bodies (FastAPI field validation).
 
 **A failing source is not an error.** If every job source fails, `/jobs/search` returns
 `200` with `[]`. Failures are logged and counted in `/agents/health`.

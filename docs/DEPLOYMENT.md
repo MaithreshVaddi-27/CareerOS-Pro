@@ -44,11 +44,16 @@ API_KEY=choose-a-long-random-string
 python -m venv backend/venv
 source backend/venv/bin/activate
 pip install -r requirements.txt
+alembic upgrade head          # create the schema
 python run.py
 ```
 
 `run.py` loads `.env` from the project root, fixes `sys.path`, and starts uvicorn on
 `127.0.0.1:8000`.
+
+> **The app does not create tables.** Schema is owned by Alembic. Run
+> `alembic upgrade head` after cloning, and again after pulling any change that adds a
+> revision. Skipping it means the first query fails on a missing `jobs` table.
 
 Optional flags:
 
@@ -73,10 +78,17 @@ docker run -d --name careeros-mysql \
   mysql:8
 ```
 
-Or point `MYSQL_HOST` at an existing instance. On first start the app creates the
-schema from the SQLAlchemy models and reconciles any `VARCHAR` columns that are
-narrower than the model — see [AUDIT.md](AUDIT.md#a1-no-database-migrations) for what
-this does *not* handle.
+Or point `MYSQL_HOST` at an existing instance. Then create the schema:
+
+```bash
+alembic upgrade head
+```
+
+Before pulling a change that adds a migration, run it as part of your deploy:
+
+```bash
+alembic upgrade head && python run.py
+```
 
 ### 4. Frontend
 
@@ -96,7 +108,16 @@ Runs MySQL, the backend and the frontend together.
 ```bash
 cp .env.example .env      # edit MYSQL_PASSWORD + API_KEY
 docker compose up --build
+docker compose exec backend alembic upgrade head
 ```
+
+Redis for shared rate-limit counters is behind a profile, so it stays optional:
+
+```bash
+docker compose --profile ratelimit up --build
+```
+
+Set `REDIS_URL=redis://redis:6379/0` in `.env` when you enable it.
 
 Useful variations:
 
@@ -116,7 +137,10 @@ The compose file builds from the repo-root `Dockerfile` for the backend and
 
 ### Checklist
 
+- [ ] `alembic upgrade head` run against the deployed database
 - [ ] `APP_ENV=production` — enables durable MySQL checkpoints
+- [ ] `CHECKPOINT_STRICT=true` — fail fast rather than lose checkpoints silently
+- [ ] `REDIS_URL` set **if** running more than one worker
 - [ ] `API_KEY` is long, random, and rotated out of band
 - [ ] `RATE_LIMIT_PER_MINUTE` set deliberately
 - [ ] `ALLOWED_ORIGINS` lists only real frontend origins
@@ -128,11 +152,13 @@ The compose file builds from the repo-root `Dockerfile` for the backend and
 
 ### Process model
 
-Run a **single** worker unless you have moved rate limiting to shared storage. The
-in-process limiter means N workers enforce N× the intended limit.
+Run a **single** worker unless `REDIS_URL` is set. With in-process counters, N workers
+enforce N× the intended limit.
 
 ```bash
 python run.py --host 0.0.0.0 --port 8000 --workers 1
+# or, with shared counters:
+REDIS_URL=redis://redis:6379/0 python run.py --host 0.0.0.0 --port 8000 --workers 4
 ```
 
 ### Behind a reverse proxy
@@ -191,18 +217,25 @@ root and that both are set. `run.py` reads `.env` before importing `config`, but
 `python -m backend.cli` does not — export the variables or use `python run.py`.
 
 **`Data too long for column 'source_id'`**
-The table predates a widened model column. `sync_schema()` widens `VARCHAR` at startup,
-so this means the app started without reaching that code — usually a `create_all`
-failure earlier in `lifespan`. Check the startup logs. Or widen manually:
-`ALTER TABLE jobs MODIFY COLUMN source_id VARCHAR(512);`
+The table predates a widened model column. Run the revision that widens it:
+
+```bash
+alembic upgrade head
+```
+
+If no such revision exists, the model and migrations have drifted — `alembic check`
+will say so. Generate one with
+`alembic revision --autogenerate -m "widen source_id to 512"`, review it, and commit.
 
 **Checkpoints not surviving restarts**
-Either `APP_ENV=development` (in-memory by design) or MySQL 9.x. Confirm the
-`AIOMySQLSaver` fallback warning in the logs.
+Either `APP_ENV=development` (in-memory by design), or MySQL 9.x. Check `/health` —
+`checks.checkpoint.kind` shows `memory` with a `DEGRADED` detail. Set
+`CHECKPOINT_STRICT=true` so this fails at startup instead.
 
 **`429` too aggressive in production**
 Confirm proxy headers are forwarded — without `X-Forwarded-For` every client shares
-one bucket. Then confirm `RATE_LIMIT_PER_MINUTE`.
+one bucket. Confirm `REDIS_URL` if you run multiple workers. Then check
+`RATE_LIMIT_PER_MINUTE`.
 
 **Career page returns nothing**
 Run the CLI against that company to see which URL it resolves to and what it parses.

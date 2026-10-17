@@ -48,9 +48,45 @@ password are safe.
 |---|---|---|
 | `API_KEY` | *(required)* | Sent as `X-API-Key`. |
 | `RATE_LIMIT_PER_MINUTE` | `60` | `0` or negative disables limiting. `< 10` and `> 1000` log a startup warning. |
+| `REDIS_URL` | *(empty)* | Shared rate-limit counters. Empty = per-process counters. |
 | `ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:3000,…` | Comma-separated CORS origins. |
 
-Rate-limit state is per-process. See [AUDIT.md](AUDIT.md#a2-rate-limiting-is-per-process).
+### Rate limiting across workers
+
+`REDIS_URL` empty means counters live in process memory. That is correct for a
+single worker and wrong for several — each worker counts independently, so N workers
+enforce N × `RATE_LIMIT_PER_MINUTE`.
+
+```dotenv
+REDIS_URL=redis://redis:6379/0
+```
+
+The bundled Redis is behind a compose profile so it stays optional:
+
+```bash
+docker compose --profile ratelimit up -d redis
+```
+
+`/health` reports which backend is live and marks the check `degraded` when
+production is running on in-process counters.
+
+If Redis is set but unreachable, the limiter **fails open** — requests are served and
+an error is logged — rather than returning 500 on every call. The in-memory counter
+still applies as a backstop.
+
+Related: without proxy headers, every request looks like it came from the proxy, so
+all clients share one bucket. See [DEPLOYMENT.md](DEPLOYMENT.md#behind-a-reverse-proxy).
+
+### Checkpoint durability
+
+| Variable | Default | Notes |
+|---|---|---|
+| `CHECKPOINT_STRICT` | `false` | `true` refuses to start when MySQL checkpointing fails, instead of silently degrading to in-memory. |
+
+MySQL 9.x cannot run `AIOMySQLSaver.setup()` (it disallows MD5 in generated columns).
+The app degrades to in-memory checkpoints and **says so on `/health`**, but the
+checkpointer still looks healthy from every other angle. Set this `true` in production
+so the failure is a refusal to start rather than silent data loss.
 
 ---
 
@@ -184,10 +220,16 @@ configuration must call `get_settings.cache_clear()`.
 commas. `pydantic-settings` only parses JSON for real container types, so typing one
 as `list[str]` would require `["a","b"]` in `.env` and silently break the common case.
 
-**Changing a `String(n)` length.** Schema is reconciled at startup by
-`core/db.py:sync_schema()`, which only ever *widens* `VARCHAR` columns to match the
-model. Shrinking a column, or adding a `NOT NULL` column without a default, is **not**
-handled — see [AUDIT.md](AUDIT.md#a1-no-database-migrations).
+**Changing a `String(n)` length.** Schema is owned by Alembic. Change the model, then
+generate and review a revision:
+
+```bash
+alembic revision --autogenerate -m "widen source_id to 512"
+alembic upgrade head
+```
+
+`alembic check` exits non-zero if the models and the migrations have drifted; it also
+runs in CI. Never edit a revision that has been applied anywhere — add a new one.
 
 ---
 
@@ -197,6 +239,8 @@ handled — see [AUDIT.md](AUDIT.md#a1-no-database-migrations).
 - [ ] `API_KEY` is a long random value
 - [ ] `RATE_LIMIT_PER_MINUTE` is set deliberately
 - [ ] `ALLOWED_ORIGINS` lists only real frontend origins
-- [ ] MySQL is 8.x, not 9.x
+- [ ] MySQL is 8.x, not 9.x — or `CHECKPOINT_STRICT=true` so a checkpoint
+      failure is a refusal to start rather than silent data loss
 - [ ] `.env` is not committed — it is gitignored
 - [ ] `COMPANY_SCRAPER_USER_AGENT` identifies you with a contact URL
+- [ ] `alembic upgrade head` has been run against the deployed database

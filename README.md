@@ -126,8 +126,9 @@ API_KEY=choose-a-long-random-string
 ```
 
 > MySQL 8.x only. MySQL 9.x disallows MD5 in generated columns, which breaks the
-> LangGraph checkpoint tables. The app falls back to in-memory checkpoints with a
-> warning rather than failing.
+> LangGraph checkpoint tables. The app falls back to in-memory checkpoints and reports
+> it as `degraded` on `/health`; set `CHECKPOINT_STRICT=true` in production to make that
+> a refusal to start instead.
 
 ### 2. Backend
 
@@ -144,8 +145,13 @@ docker run -d --name careeros-mysql \
   -e MYSQL_PASSWORD=your-password \
   -p 3306:3306 mysql:8
 
+alembic upgrade head                     # create the schema
 python run.py                            # → http://127.0.0.1:8000
 ```
+
+> The app runs **no DDL at startup** — Alembic owns the schema. Run
+> `alembic upgrade head` after cloning, and again after pulling any change that adds a
+> migration. See [DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 Interactive API docs: <http://127.0.0.1:8000/docs>
 
@@ -164,7 +170,11 @@ Set `VITE_API_BASE=http://127.0.0.1:8000` in `frontend/.env`.
 ```bash
 cp .env.example .env                     # then edit MYSQL_PASSWORD + API_KEY
 docker compose up --build
+docker compose exec backend alembic upgrade head
 ```
+
+Add `--profile ratelimit` to also start Redis for shared rate-limit counters (then set
+`REDIS_URL=redis://redis:6379/0`).
 
 ### Verify it works
 
@@ -208,7 +218,7 @@ All routes except `/health*` require the `X-API-Key` header.
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| `GET` | `/health` | — | Component health: DB, rate limiter, embeddings, vector store. |
+| `GET` | `/health` | — | Component health: DB, rate limiter, checkpointer, embeddings, vector store. |
 | `GET` | `/health/ready` | — | Readiness probe. `200` when servable, `503` otherwise. |
 | `GET` | `/agents/health` | key | Per-agent call counts, latency and failure rate. |
 | `POST` | `/jobs/search` | key | Fan out to all sources, normalize, dedup, hard-filter. |
@@ -392,9 +402,10 @@ python -m backend.cli "Acme Corp" --location Berlin --max-concurrency 2
 source backend/venv/bin/activate
 pip install "ruff==0.17.1"
 
-ruff check backend/ tests/       # lint
-ruff check backend/ tests/ --fix
-python -m pytest -v             # tests
+ruff check backend/ tests/ alembic/       # lint
+ruff check backend/ tests/ alembic/ --fix
+python -m pytest -v                      # tests — includes the migration-drift check
+alembic check                            # models vs migrations (also in CI)
 ```
 
 Ruff is **pinned in CI on purpose**. Its default rule set changed drastically in 0.17,
@@ -429,10 +440,10 @@ Active development. Honest summary of where it stands:
 dedup, hard filtering, hybrid ranking, grounded LLM explanation, career-page
 scraping, liveness verification, health and agent monitoring, CI.
 
-**Known limitations** — no database migrations (schema is reconciled at startup);
-in-memory rate limiting does not work across multiple workers; the vector store falls
-back to a local in-process implementation; the human-review interrupt is wired but the
-resume path is not yet exposed over HTTP.
+**Known limitations** — every `/jobs/match` request loads the whole `jobs` table and
+filters in Python; there is no pagination; the vector store falls back to a local
+in-process implementation; the human-review interrupt is wired but the resume path is not
+yet exposed over HTTP.
 
 These are tracked with severity and remediation cost in
 **[docs/AUDIT.md](docs/AUDIT.md)**.

@@ -15,10 +15,17 @@ Set `MYSQL_PASSWORD` and `API_KEY` in `.env` (see [CONFIGURATION.md](CONFIGURATI
 ## The loop
 
 ```bash
-ruff check backend/ tests/            # lint
-ruff check backend/ tests/ --fix      # autofix (imports, safe rewrites)
-python -m pytest -v                  # tests
-cd frontend && npm run build         # frontend has no test suite
+ruff check backend/ tests/ alembic/    # lint
+ruff check backend/ tests/ alembic/ --fix   # autofix (imports, safe rewrites)
+python -m pytest -v                    # tests — includes `alembic check`
+cd frontend && npm run build           # frontend has no test suite
+```
+
+Schema changes are the one thing you cannot skip:
+
+```bash
+alembic revision --autogenerate -m "describe the change"   # then edit + review
+alembic check          # exit 0 = models and migrations agree (also in CI)
 ```
 
 ### Why the pin
@@ -73,7 +80,14 @@ not from a plausible guess. `unknown` is a valid, load-bearing value that
 ### Add a field to both layers
 
 A new job attribute needs the model column, the schema field, the parse in
-`normalize.py`, **and** the `VARCHAR` length registered in `core/db.py:sync_schema()`.
+`normalize.py`, **and** a migration:
+
+```bash
+alembic revision --autogenerate -m "add seniority_band to jobs"
+```
+
+Review the generated file before committing — autogenerate catches structure, not
+intent. Never edit a revision that has been applied anywhere; add a new one instead.
 
 ## Testing
 
@@ -88,6 +102,9 @@ beyond `conftest.py`.
 | `test_filters.py` | Each hard filter in isolation and combined |
 | `test_job_adapter.py` | Adapter selection, mock/live mode, fan-out |
 | `test_match_prompt.py` | Prompt invariants and explain-node concurrency |
+| `test_middleware.py` | Rate limiting (both backends), API-key auth, response headers |
+| `test_migrations.py` | Migrations match the models; `.env.example` matches `Settings` |
+| `test_checkpoint.py` | Checkpointer selection, degradation, `CHECKPOINT_STRICT` |
 | `test_verification.py` | Liveness checking |
 
 ### Conventions
@@ -150,7 +167,7 @@ The copies in test_dedup were weaker subsets of the same assertions.
 | An ATS layout | Add the path to `COMPANY_CAREER_PAGE_PATTERNS` — no code change |
 | A hard filter | Add to `filters.py` and to `SearchRequest` |
 | An LLM provider | Implement `LLMProvider` in `model_router.py`, add to `_get_provider()` and the chain |
-| A table | Add to `models/`, re-export from `models/__init__.py`, register in `sync_schema()` |
+| A table | Add to `models/`, re-export from `models/__init__.py`, then `alembic revision --autogenerate -m "add X"` |
 | A response field | Add to `schemas/job.py` — the OpenAPI schema follows automatically |
 
 ## Before you ship something significant
