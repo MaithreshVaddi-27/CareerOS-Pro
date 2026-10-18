@@ -26,10 +26,23 @@ import httpx
 from bs4 import BeautifulSoup
 
 from backend.core.config import get_settings
+from backend.core.netguard import BlockedTarget, assert_public_https, is_public_https
 from backend.schemas import RawJobPosting
 
 logger = logging.getLogger("careeros")
 settings = get_settings()
+
+
+async def _guard_request(request: httpx.Request) -> None:
+    """httpx request hook: refuse any hop that is not HTTPS to a public IP.
+
+    Raises inside the hook, which aborts the request. Callers treat BlockedTarget
+    as a soft miss (the URL is simply not scrapeable) rather than an error.
+
+    Must be async: httpx awaits hooks on AsyncClient and would try to await the
+    return value of a plain function.
+    """
+    assert_public_https(str(request.url))
 
 # Anchor text that is navigation, not a job title.
 _NAV_WORDS = ("apply", "read more", "skip", "home", "learn more", "view job", "details")
@@ -144,6 +157,10 @@ class CompanyScraper:
                     "Accept": "text/html,application/xhtml+xml",
                 },
                 follow_redirects=True,
+                # httpx fires the "request" hook once per hop, redirects
+                # included, so this is the only place the guard has to live to
+                # cover a public domain that 302s to 169.254.169.254.
+                event_hooks={"request": [_guard_request]},
             )
         return self._client
 
@@ -176,6 +193,12 @@ class CompanyScraper:
             if not pattern:
                 continue
             url = pattern if pattern.startswith("http") else self._join(base_url, pattern)
+            # An absolute pattern from COMPANY_CAREER_PAGE_PATTERNS bypasses the
+            # base_site derivation, so it is the one config path that could name
+            # an internal host. Refuse it at resolution rather than at connect.
+            if pattern.startswith("http") and not is_public_https(url):
+                logger.warning("career-page pattern %r is not a public https URL — skipping", pattern)
+                continue
             if url not in seen:
                 seen.add(url)
                 candidates.append(url)
@@ -242,6 +265,14 @@ class CompanyScraper:
                 logger.info("robots.txt unavailable at %s (HTTP %s) — allowing", robots_url, resp.status_code)
         except httpx.HTTPError as exc:
             logger.info("robots.txt unreachable at %s (%s) — allowing", robots_url, exc)
+        except BlockedTarget as exc:
+            # Guard refused the robots.txt host itself. Disallow rather than
+            # allow: an unreachable-by-policy origin gets no crawl.
+            logger.warning("refusing robots.txt at %s: %s", robots_url, exc)
+            parser = RobotFileParser()
+            parser.parse(["User-agent: *", "Disallow: /"])
+            self._robots[origin] = parser
+            return parser
 
         if cacheable:
             self._robots[origin] = parser
@@ -297,6 +328,11 @@ class CompanyScraper:
                         await self._backoff(attempt, url, f"transport error: {exc}")
                         continue
                     logger.warning("Giving up on %s after transport errors: %s", url, exc)
+                    return None
+                except BlockedTarget as exc:
+                    # Not a transport problem — retrying cannot help. A blocked
+                    # host is a permanent miss for this URL.
+                    logger.warning("refusing to fetch %s: %s", url, exc)
                     return None
 
                 if resp.status_code == 200:

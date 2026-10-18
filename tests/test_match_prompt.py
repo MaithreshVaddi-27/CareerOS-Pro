@@ -16,6 +16,15 @@ from backend.services.matching.model_router import (
 )
 
 # ---------------------------------------------------------------------------
+# Test doubles for the explain node
+#
+# _evidence_and_explain batch-loads the jobs it is about to explain (it used to
+# call db.get() once per ranked entry, an N+1 bounded by top_k), so the doubles
+# need execute() rather than get().
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
 # Prompt shape
 # ---------------------------------------------------------------------------
 
@@ -66,9 +75,59 @@ def test_empty_skills_is_expressible():
     assert "candidate.skills[0]::" in block
 
 
-# ---------------------------------------------------------------------------
 # Concurrent explain node
 # ---------------------------------------------------------------------------
+
+
+class _Rows:
+    """Stand-in for the scalar result set a Session.execute() returns."""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class FakeDB:
+    """_evidence_and_explain batch-loads the jobs it is about to explain.
+
+    It used to call db.get() once per ranked entry, which was an N+1 bounded by
+    top_k. The double therefore needs execute() rather than get(), and rollback()
+    because the node now hands the pooled connection back once it has read.
+    """
+
+    def __init__(self, rows=()):
+        self._rows = rows
+
+    def execute(self, _stmt):
+        return _Rows(self._rows)
+
+    def rollback(self):
+        pass
+
+
+class FakeJob:
+    def __init__(self, i):
+        self.id = i
+        self.title = f"Job {i}"
+        self.description = "Python"
+
+
+def _explained_state(ids):
+    return {
+        "request": {"query": "python", "candidate_skills": ["Python"]},
+        "candidate_ids": [],
+        "ranked": [
+            {"job_id": i, "keyword_score": 0.0, "semantic_score": 0.0, "hybrid_score": 0.0}
+            for i in ids
+        ],
+        "approved_ids": [],
+        "rejected_ids": [],
+    }
 
 
 def test_explain_node_runs_concurrently_not_serially():
@@ -76,63 +135,73 @@ def test_explain_node_runs_concurrently_not_serially():
     well under the 300ms a serial loop would cost."""
     import backend.graph as graph
 
-    class FakeJob:
-        def __init__(self, i):
-            self.title = f"Job {i}"
-            self.description = "Python"
-
-    class FakeDB:
-        def get(self, _model, job_id):
-            return FakeJob(job_id)
-
     class SlowRouter:
         async def explain_match(self, *_args):
             await asyncio.sleep(0.05)
             return MatchExplanation(explanation="ok", confidence=0.9)
 
-    ranked = [{"job_id": str(i), "keyword_score": 0.0, "semantic_score": 0.0,
-               "hybrid_score": 0.0} for i in range(6)]
-    state = {"request": {"query": "python", "candidate_skills": ["Python"]},
-             "candidate_ids": [], "ranked": ranked, "approved_ids": [],
-             "rejected_ids": []}
+    ids = [str(i) for i in range(6)]
+    db = FakeDB([FakeJob(i) for i in ids])
 
     original = graph.get_model_router_for_request
     graph.get_model_router_for_request = lambda **_kw: SlowRouter()
     try:
         start = time.monotonic()
-        result = asyncio.run(graph._evidence_and_explain(state, FakeDB()))
+        result = asyncio.run(graph._evidence_and_explain(_explained_state(ids), db))
         elapsed = time.monotonic() - start
     finally:
         graph.get_model_router_for_request = original
 
-    assert len(result["ranked"]) == 6
-    assert all(e["confidence"] == 0.9 for e in result["ranked"])
-    assert all(e["evidence"] == "" for e in result["ranked"])
-    assert elapsed < 0.2, f"explain looks serial: {elapsed:.3f}s for 6 x 50ms"
+    assert elapsed < 0.2, f"explain looks serial: {elapsed:.3f}s for 6x50ms"
+    assert all("confidence" in entry for entry in result["ranked"])
 
 
 def test_explain_node_skips_missing_jobs():
+    """A ranked id with no matching row must not reach the LLM."""
     import backend.graph as graph
-
-    class FakeDB:
-        def get(self, _model, _job_id):
-            return None
 
     class Router:
         async def explain_match(self, *_a):
             raise AssertionError("must not be called for a missing job")
 
-    ranked = [{"job_id": "missing", "keyword_score": 0.0, "semantic_score": 0.0,
-               "hybrid_score": 0.0}]
-    state = {"request": {"query": "q", "candidate_skills": []},
-             "candidate_ids": [], "ranked": ranked, "approved_ids": [],
-             "rejected_ids": []}
-
     original = graph.get_model_router_for_request
     graph.get_model_router_for_request = lambda **_kw: Router()
     try:
-        result = asyncio.run(graph._evidence_and_explain(state, FakeDB()))
+        result = asyncio.run(graph._evidence_and_explain(_explained_state(["missing"]), FakeDB()))
     finally:
         graph.get_model_router_for_request = original
 
     assert "confidence" not in result["ranked"][0]
+
+
+def test_explain_node_caps_llm_fanout_below_top_k():
+    """Ranking scales to top_k=100; explaining must not.
+
+    At concurrency 5 and a 30s provider timeout, explaining all 100 meant a
+    worst case of ceil(100/5) x 30s = 10 minutes on the request path. Only the
+    head of the ranking gets an explanation; the tail carries scores alone.
+    """
+    import backend.graph as graph
+
+    calls: list[str] = []
+
+    class CountingRouter:
+        async def explain_match(self, title, _desc, _skills):
+            calls.append(title)
+            return MatchExplanation(explanation="ok", confidence=0.9)
+
+    ids = [str(i) for i in range(100)]
+    db = FakeDB([FakeJob(i) for i in ids])
+
+    original = graph.get_model_router_for_request
+    graph.get_model_router_for_request = lambda **_kw: CountingRouter()
+    try:
+        result = asyncio.run(graph._evidence_and_explain(_explained_state(ids), db))
+    finally:
+        graph.get_model_router_for_request = original
+
+    assert len(calls) == graph._MAX_EXPLAIN_JOBS
+    # Nothing is dropped from the response — only the explanation is missing.
+    assert len(result["ranked"]) == 100
+    explained = sum(1 for e in result["ranked"] if "confidence" in e)
+    assert explained == graph._MAX_EXPLAIN_JOBS

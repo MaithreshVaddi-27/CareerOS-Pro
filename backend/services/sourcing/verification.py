@@ -7,10 +7,15 @@ invents a verification result — failure to reach Firecrawl or the URL means
 verified stays False, not True (spec 2.3: unknown/false, never guessed).
 """
 
+import logging
+
 import httpx
 from pydantic import BaseModel, ValidationError
 
 from backend.core.config import get_settings
+from backend.core.netguard import BlockedTarget, assert_public_https, is_public_https
+
+logger = logging.getLogger("careeros.verification")
 
 settings = get_settings()
 
@@ -21,11 +26,27 @@ _http_client = None
 _firecrawl_client = None
 
 
+async def _guard_request(request: httpx.Request) -> None:
+    """httpx request hook — fires once per hop, redirects included.
+
+    `apply_url` is ingested verbatim from third-party feeds anyone can post to
+    (RemoteOK, Arbeitneed, ...), so this is an attacker-reachable SSRF target
+    against the metadata service and every container on careeros-net.
+
+    Must be async: httpx awaits hooks on AsyncClient.
+    """
+    assert_public_https(str(request.url))
+
+
 def get_http_client() -> httpx.AsyncClient:
     """Get or create a reusable HTTP client."""
     global _http_client
     if _http_client is None:
-        _http_client = httpx.AsyncClient(timeout=10.0, follow_redirects=True)
+        _http_client = httpx.AsyncClient(
+            timeout=10.0,
+            follow_redirects=True,
+            event_hooks={"request": [_guard_request]},
+        )
     return _http_client
 
 
@@ -66,6 +87,10 @@ async def _http_head_check(url: str) -> bool:
     On 403 (forbidden), falls back to GET with a proper User-Agent header
     before giving up, since some ATS platforms block HEAD but allow GET.
     """
+    # Checked up front too, so a blocked target is a clean "not reachable"
+    # rather than an exception escaping from inside the hook.
+    if not is_public_https(url):
+        return False
     client = get_http_client()
     try:
         resp = await client.head(url)
@@ -76,7 +101,12 @@ async def _http_head_check(url: str) -> bool:
             resp = await client.get(url, headers={"User-Agent": "CareerOS/0.1"})
             return resp.status_code < 400
         return resp.status_code < 400
-    except httpx.HTTPError:
+    except BlockedTarget as exc:
+        # A redirect hop pointed somewhere we refuse.
+        logger.warning("blocked redirect target while verifying: %s", exc)
+        return False
+    except httpx.HTTPError as exc:
+        logger.info("HEAD check failed for apply_url: %s", exc)
         return False
 
 
@@ -91,9 +121,10 @@ async def _firecrawl_scrape(url: str) -> FirecrawlResponse | None:
         resp.raise_for_status()
         return FirecrawlResponse.model_validate(resp.json())
     except (httpx.HTTPError, ValidationError) as e:
-        # Log the exception for debugging
-        import logging
-        logging.getLogger("careeros").debug(f"Firecrawl scrape failed: {e}")
+        # Warning, not debug: at the root INFO level this never emitted, so a bad
+        # key or exhausted quota looked identical to an empty page — and the
+        # caller returns the same verified=False either way.
+        logger.warning("firecrawl scrape failed: %s", e)
         return None
 
 

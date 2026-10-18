@@ -2,8 +2,7 @@
 
 CareerOS already runs several independent agents that can each fail on their
 own without taking the system down:
-  - LLM provider agents (llama.cpp / NVIDIA / OpenRouter / Gemini) in
-    services/model_router.py, tried in a fallback chain.
+  - The Gemini LLM provider agent in services/model_router.py.
   - Job-source agents (JSearch / Adzuna / Remotive / RemoteOK / Arbeitnow /
     company-career-page scraper) in services/job_api_adapter.py, fanned out
     in parallel.

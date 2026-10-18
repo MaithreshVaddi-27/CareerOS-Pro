@@ -1,20 +1,34 @@
-fastapi>=0.115
-uvicorn[standard]>=0.30.0
-beautifulsoup4>=4.12
-pydantic>=2.7
-pydantic-settings>=2.3
-sqlalchemy>=2.0
-alembic>=1.13
-pymysql>=1.1
-httpx>=0.27
-python-dotenv>=1.0
-qdrant-client>=1.10
-scikit-learn>=1.5
-langgraph>=1.0
-langchain-core>=0.3
-langchain-openrouter>=0.1
-langchain-nvidia-ai-endpoints>=0.1
-langgraph-checkpoint-mysql[aiomysql]>=2.0
-redis>=5.0
-pytest>=8.0
-pytest-asyncio>=0.23
+# Exactly pinned, deliberately. With `>=` ranges the same commit resolved
+# different packages on different days, so a green pipeline could silently
+# pick up a new release — and a CI run proves nothing about the image you
+# deployed last month.
+#
+# These are the versions the 261-test suite passed against. Bump deliberately,
+# with the suite green, not on a schedule.
+#
+# CI (`.github/workflows/ci.yml`) fails if this file drifts back to a range.
+# It checks direct dependencies only; transitive deps still resolve within what
+# these constraints allow. That is a real limit — full reproducibility needs a
+# `pip freeze` export or hashes, which is a bigger change than it looks.
+
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+beautifulsoup4==4.15.0
+pydantic==2.12.5
+pydantic-settings==2.15.0
+sqlalchemy==2.0.52
+pymysql==1.2.0
+httpx==0.28.1
+python-dotenv==1.2.3
+qdrant-client==1.19.0
+scikit-learn==1.9.0
+langgraph==1.2.11
+langchain-core==1.6.0
+langgraph-checkpoint-mysql[aiomysql]==3.0.0
+redis==8.1.0
+
+# Test-only. Not needed at runtime, but they live in the one requirements file
+# so CI and the local venv cannot drift apart — the most common "works on my
+# machine" bug in a small project like this.
+pytest==9.1.1
+pytest-asyncio==1.4.0

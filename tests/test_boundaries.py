@@ -25,6 +25,18 @@ def _backend_sources() -> list[Path]:
 
 SRC = _backend_sources()
 
+# Pre-filter the source list per rule instead of parametrizing over everything
+# and skipping inside the body. The skip-in-body form produced 54 skips — 23%
+# of the reported test count was noise, it drowned the real signal in every
+# `pytest -v` run and every CI log, and it had a false negative: the
+# subpackage rule tested `path.parent.name`, so a *nested* file such as
+# services/matching/deep/x.py would silently skip even though it is exactly the
+# case that matters. Filtering keeps the same assertions, enrols new files
+# automatically, and reports zero skips.
+CORE_SOURCES = [p for p in SRC if p.parts[-2] == "core"]
+SERVICE_SOURCES = [p for p in SRC if "services" in p.parts]
+SUBPKG_SOURCES = [p for p in SRC if p.parent.name in SERVICE_PKGS]
+
 
 def _imports(path: Path) -> set[str]:
     """Dotted module names this file imports (absolute and relative, resolved)."""
@@ -48,28 +60,22 @@ def _imports(path: Path) -> set[str]:
     return found
 
 
-@pytest.mark.parametrize("path", sorted(SRC), ids=lambda p: p.name)
+@pytest.mark.parametrize("path", CORE_SOURCES, ids=lambda p: p.name)
 def test_core_never_imports_services(path: Path):
-    if path.parts[-2] != "core":
-        pytest.skip("not in core/")
     leaked = {m for m in _imports(path) if m.startswith("backend.services")}
     assert not leaked, f"core/{path.name} imports {sorted(leaked)}"
 
 
-@pytest.mark.parametrize("path", sorted(SRC), ids=lambda p: p.name)
+@pytest.mark.parametrize("path", SERVICE_SOURCES, ids=lambda p: p.name)
 def test_services_never_import_the_entrypoints(path: Path):
-    if "services" not in path.parts:
-        pytest.skip("not in services/")
     banned = ("backend.main", "backend.graph", "backend.cli", "backend.retention")
     leaked = {m for m in _imports(path) if m.startswith(banned)}
     assert not leaked, f"services/{path.name} imports {sorted(leaked)}"
 
 
-@pytest.mark.parametrize("path", sorted(SRC), ids=lambda p: p.name)
+@pytest.mark.parametrize("path", SUBPKG_SOURCES, ids=lambda p: p.name)
 def test_service_subpackages_do_not_import_each_other(path: Path):
     """The sourcing/matching split is load-bearing, not cosmetic — see ARCHITECTURE.md."""
-    if path.parent.name not in SERVICE_PKGS:
-        pytest.skip("not directly in a services/ subpackage")
     mine = path.parent.name
     others = {p for p in SERVICE_PKGS if p != mine}
     leaked = {

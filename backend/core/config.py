@@ -31,16 +31,6 @@ class Settings(BaseSettings):
 
     gemini_api_key: str = ""
     gemini_model: str = "gemini-flash-latest"  # alias, auto-follows Google rollouts — never pin exact version
-    llama_cpp_base_url: str = ""
-
-    # OpenRouter
-    openrouter_api_key: str = ""
-    openrouter_model: str = "anthropic/claude-3.5-sonnet"
-
-    # NVIDIA NIM
-    nvidia_api_key: str = ""
-    nvidia_model: str = "meta/llama-3.1-70b-instruct"
-
     qdrant_url: str = ""
 
     firecrawl_api_key: str = ""
@@ -67,10 +57,22 @@ class Settings(BaseSettings):
 
     @property
     def allowed_origins_list(self) -> List[str]:
-        return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+        origins = [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+        # main.py registers CORSMiddleware with allow_credentials=True. Starlette's
+        # behaviour for "*" under credentials is to echo the request's Origin back
+        # in Access-Control-Allow-Origin rather than send a literal "*", so a typo
+        # here silently turns into credentialed cross-origin access for everyone.
+        # Refuse it rather than documenting the hazard.
+        if "*" in origins and self.app_env == "production":
+            raise ValueError(
+                "ALLOWED_ORIGINS='*' is refused in production: it is combined with "
+                "allow_credentials=True, which makes every origin credentialed. "
+                "List the explicit frontend origins instead."
+            )
+        return origins
 
 
-    llm_provider_mode: str = "auto"  # "auto" | "llama" | "gemini" | "openrouter" | "nvidia" | "none"
+    llm_provider_mode: str = "auto"  # "auto" | "gemini" | "none"
 
     # Company scraper configuration
     # Comma-separated paths probed under the company domain, highest priority

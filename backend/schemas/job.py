@@ -67,15 +67,18 @@ class JobOut(BaseModel):
 
 
 class SearchRequest(BaseModel):
-    query: str = ""
-    location: Optional[str] = None
-    employment_type: Optional[str] = None
-    experience_level: Optional[str] = None  # intern/fresher/no_experience/entry/mid/senior
+    # Free-text bounds. These are far above realistic search input; their job is
+    # to stop an unbounded body from reaching the log line and the checkpoint
+    # thread hash, and from forging log entries via embedded newlines.
+    query: str = Field(default="", max_length=200)
+    location: Optional[str] = Field(default=None, max_length=100)
+    employment_type: Optional[str] = Field(default=None, max_length=50)
+    experience_level: Optional[str] = Field(default=None, max_length=50)
     remote_only: bool = False
     min_salary: Optional[float] = None
     posted_within_days: Optional[int] = None
     sources: Optional[list[str]] = None  # restrict results to these job sources (e.g. ["jsearch","company"])
-    llm_provider: Optional[str] = None  # "auto" | "llama" | "gemini" | "openrouter" | "nvidia" | "none"
+    llm_provider: Optional[str] = None  # "auto" | "gemini" | "none"
     model_name: Optional[str] = None
 
     # Pagination. Capped so one request can never pull an unbounded result set.
@@ -85,11 +88,11 @@ class SearchRequest(BaseModel):
 
 
 class MatchRequest(BaseModel):
-    query: str
-    candidate_skills: list[str] = Field(default_factory=list)
-    location: Optional[str] = None
-    employment_type: Optional[str] = None
-    experience_level: Optional[str] = None
+    query: str = Field(max_length=200)
+    candidate_skills: list[str] = Field(default_factory=list, max_length=100)
+    location: Optional[str] = Field(default=None, max_length=100)
+    employment_type: Optional[str] = Field(default=None, max_length=50)
+    experience_level: Optional[str] = Field(default=None, max_length=50)  # intern/fresher/no_experience/entry/mid/senior
     remote_only: bool = False
     min_salary: Optional[float] = None
     posted_within_days: Optional[int] = None
@@ -99,7 +102,7 @@ class MatchRequest(BaseModel):
     # Skip this many eligible candidates before ranking. Lets a caller walk past
     # the first page of an unranked-by-score ordering without re-sending filters.
     offset: int = Field(default=0, ge=0)
-    llm_provider: Optional[str] = None  # "auto" | "llama" | "gemini" | "openrouter" | "nvidia" | "none"
+    llm_provider: Optional[str] = None  # "auto" | "gemini" | "none"
     model_name: Optional[str] = None
 
 

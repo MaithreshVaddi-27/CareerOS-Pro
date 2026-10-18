@@ -26,3 +26,22 @@ def set_env_vars(monkeypatch):
     monkeypatch.setenv("MYSQL_USER", "test")
     # For job adapter tests
     monkeypatch.setenv("JOB_API_MODE", "mock")
+
+
+@pytest.fixture(autouse=True)
+def _netguard_does_not_touch_dns(monkeypatch):
+    """Pin every outbound target to a public IP for the duration of a test.
+
+    backend.core.netguard resolves the host to reject private/link-local
+    addresses. Most unit tests drive a mocked httpx transport and assert on
+    scraper/verification logic, so a real getaddrinfo would make them depend
+    on the network (and on acme.com having DNS records). Stub it to one public
+    address so the guard passes and the rest of the test is unchanged.
+
+    Tests for the guard's own behaviour patch this fixture out — see
+    tests/test_netguard.py.
+    """
+    monkeypatch.setattr(
+        "backend.core.netguard.socket.getaddrinfo",
+        lambda *a, **kw: [(2, 1, 6, "", ("93.184.216.34", 443))],
+    )

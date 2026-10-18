@@ -15,7 +15,6 @@ import logging
 import secrets
 import time
 import uuid
-from collections import defaultdict, deque
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -26,9 +25,11 @@ from backend.core.config import get_settings
 settings = get_settings()
 logger = logging.getLogger("careeros")
 
-_request_counts: dict[str, deque] = defaultdict(deque)
-_burst_counts: dict[str, deque] = defaultdict(deque)
+_request_counts: dict[str, list] = {}
+_burst_counts: dict[str, list] = {}
 _RATE_LIMIT_WINDOW_SECONDS = 60
+# Last time stale per-client entries were reclaimed. See _sweep.
+_last_sweep = 0.0
 
 # Created lazily on first use so importing this module never touches Redis.
 _redis = None
@@ -74,24 +75,43 @@ async def _redis_limit(client, key: str, limit: int, window: int) -> bool:
     return count > limit
 
 
-def _memory_limit(client_ip: str, store: dict, limit: int, window: int) -> bool:
+def _sweep(store: dict, window: int) -> None:
+    """Reclaim entries whose window has fully expired.
+
+    The previous implementation only evicted a client's own bucket when that
+    same client came back — so a client that sent five requests and then went
+    away kept its deque, and its dict key, for the life of the process. The
+    comment claimed otherwise. Memory therefore grew with the number of
+    *distinct IPs ever seen*: ~950 B per entry across both windows, and this
+    host has no memory limit set.
+
+    This sweeps every `window` seconds instead, so the store is O(distinct
+    clients currently active) rather than O(distinct clients all time).
+    """
+    global _last_sweep
     now = time.monotonic()
-    bucket = store[client_ip]
-    while bucket and now - bucket[0] > window:
-        bucket.popleft()
-    if not bucket:
-        # The window expired, so this client is under the limit either way. Drop
-        # the key and start a fresh deque: store is a defaultdict, so a client
-        # that stops sending would otherwise leave its deque in the dict forever
-        # and the dict would grow for the life of the process. Only an *empty*
-        # bucket is reclaimed — deleting a full one would hand an over-limit
-        # client a free reset on every rejected request.
-        store.pop(client_ip, None)
-        bucket = store[client_ip]
-    if len(bucket) >= limit:
-        return True
-    bucket.append(now)
-    return False
+    if now - _last_sweep < window:
+        return
+    _last_sweep = now
+    cutoff = now - window
+    for ip in [ip for ip, entry in store.items() if entry[0] < cutoff]:
+        del store[ip]
+
+
+def _memory_limit(client_ip: str, store: dict, limit: int, window: int) -> bool:
+    """Fixed-window counter. Returns True if the caller is over `limit`.
+
+    A list entry is [window_start, count]. O(1) per request — the deque version
+    popped up to `limit` timestamps per call.
+    """
+    _sweep(store, window)
+    now = time.monotonic()
+    entry = store.get(client_ip)
+    if entry is None or now - entry[0] >= window:
+        store[client_ip] = [now, 1]
+        return False
+    entry[1] += 1
+    return entry[1] > limit
 
 
 def _warn_if_unsafe_rate_limit_config() -> None:

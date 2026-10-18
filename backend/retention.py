@@ -79,9 +79,17 @@ def prune_inactive_jobs(
     if not ids:
         return 0
 
-    session.execute(sa.delete(Job).where(Job.id.in_(ids)))
+    # Re-check eligibility in the DELETE, not just the SELECT. Between the two
+    # statements a concurrent /jobs/{id}/verify can bump updated_at on one of
+    # these rows and move it past the cutoff; deleting on id alone would then
+    # remove a row that had just been refreshed.
+    result = session.execute(sa.delete(Job).where(Job.id.in_(ids), *_where(days=days, now=now)))
     session.commit()
-    return len(ids)
+    # rowcount, not len(ids): a concurrent retention run can select the same
+    # batch, and its DELETE then matches 0 rows. Reporting len(ids) made the
+    # log claim rows were deleted that were not, which is exactly the number an
+    # operator uses to answer "did retention run tonight".
+    return result.rowcount
 
 
 def _where(*, days: int, now: dt.datetime | None):

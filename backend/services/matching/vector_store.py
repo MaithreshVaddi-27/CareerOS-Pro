@@ -24,11 +24,12 @@ _embedder: EmbeddingProvider = get_embedding_provider()
 
 
 _client_singleton: QdrantClient | None = None
+_collection_ready = False
 _client_lock = threading.Lock()
 
 
 def get_client() -> QdrantClient:
-    global _client_singleton
+    global _client_singleton, _collection_ready
     if _client_singleton is not None:
         return _client_singleton
     with _client_lock:
@@ -40,10 +41,22 @@ def get_client() -> QdrantClient:
         else:
             # Local file mode (default: ./qdrant_local)
             _client_singleton = QdrantClient(path=qdrant_url or "./qdrant_local")
+        ensure_collection(_client_singleton)
+        _collection_ready = True
     return _client_singleton
 
 
 def ensure_collection(client: QdrantClient) -> None:
+    """Idempotent, and called exactly once per process.
+
+    It was previously called from both index_job and semantic_search, i.e. on
+    every indexed job and every search. get_collections() is an HTTP round-trip
+    (or a locked-directory read in local mode), so a 200-posting ingest issued
+    200 of them before doing any useful work.
+    """
+    global _collection_ready
+    if _collection_ready:
+        return
     existing = [c.name for c in client.get_collections().collections]
     if COLLECTION not in existing:
         client.create_collection(
@@ -53,7 +66,6 @@ def ensure_collection(client: QdrantClient) -> None:
 
 
 def index_job(client: QdrantClient, job_id: str, title: str, description: str, skills: list[str]) -> None:
-    ensure_collection(client)
     text = f"{title}\n{description}\n{' '.join(skills)}"
     vector = _embedder.embed(text)
     client.upsert(
@@ -63,7 +75,6 @@ def index_job(client: QdrantClient, job_id: str, title: str, description: str, s
 
 
 def semantic_search(client: QdrantClient, query: str, limit: int = 20) -> list[tuple[str, float]]:
-    ensure_collection(client)
     vector = _embedder.embed(query)
     hits = client.query_points(collection_name=COLLECTION, query=vector, limit=limit).points
     return [(hit.payload["job_id"], hit.score) for hit in hits]

@@ -56,6 +56,18 @@ def upsert_job(db: Session, job: NormalizedJob) -> tuple[Job, bool]:
         posted_at=job.posted_at,
     )
     db.add(row)
-    db.commit()
-    db.refresh(row)
+    # flush, not commit. This is called once per posting from a loop, and MySQL
+    # defaults to innodb_flush_log_at_trx_commit=1 — an fsync per commit. A
+    # 200-posting ingest was 200 fsyncs and ~1000 round-trips inline in the
+    # request. flush() assigns the id without writing to disk; the caller commits
+    # once for the batch.
+    #
+    # Callers MUST commit after their loop. See _commit_batch in main.py /
+    # graph.py.
+    db.flush()
     return row, True
+
+
+def commit_batch(db: Session) -> None:
+    """Commit everything upsert_job flushed for the current batch."""
+    db.commit()

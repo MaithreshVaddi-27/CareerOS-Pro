@@ -36,6 +36,24 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, futu
 Base = declarative_base()
 
 
+def create_all() -> None:
+    """Create any tables the models declare that the database does not have yet.
+
+    The `from backend import models` below is load-bearing, not decorative.
+    `backend.core.db` holds `Base`, and each model module registers itself on
+    `Base.metadata` when it is imported — so importing only `Base` leaves the
+    metadata empty and `create_all()` exits 0 having created nothing. Every
+    deploy doc used to document that silent no-op; this is the single call the
+    docs point at now.
+
+    Import is inside the function because models/job.py imports Base from this
+    module, so a module-level import here would be circular.
+    """
+    from backend import models  # noqa: F401  — import registers on Base.metadata
+
+    Base.metadata.create_all(engine)
+
+
 def get_db():
     db = SessionLocal()
     try:

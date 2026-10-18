@@ -127,7 +127,7 @@ def no_adapters(monkeypatch):
 
     def _install(postings=()):
         monkeypatch.setattr(
-            "backend.main.get_adapter", lambda: _StubAdapter(list(postings))
+            "backend.main.get_adapter", lambda _sources=None: _StubAdapter(list(postings))
         )
 
     return _install
@@ -283,7 +283,7 @@ def test_search_surfaces_a_broken_adapter_as_a_500(client, monkeypatch):
         async def search(self, query, location=None):
             raise RuntimeError("adapter is broken")
 
-    monkeypatch.setattr("backend.main.get_adapter", lambda: _Boom())
+    monkeypatch.setattr("backend.main.get_adapter", lambda _sources=None: _Boom())
     with pytest.raises(RuntimeError, match="adapter is broken"):
         client.post("/jobs/search", json={"query": "python"}, headers=AUTH)
 

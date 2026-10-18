@@ -27,7 +27,7 @@ from backend.services.matching.filters import apply_hard_filters, build_sql_filt
 from backend.services.matching.model_router import get_model_router_for_request
 from backend.services.matching.reranker import ScoredJob, keyword_score, rerank
 from backend.services.matching.vector_store import get_client, index_job, semantic_search
-from backend.services.sourcing.dedup import upsert_job
+from backend.services.sourcing.dedup import commit_batch, upsert_job
 from backend.services.sourcing.job_api_adapter import get_adapter
 from backend.services.sourcing.normalize import normalize_job
 
@@ -43,6 +43,13 @@ _checkpoint_status: dict = {"kind": "unknown", "detail": "checkpointer not initi
 # Fan-out cap for per-job LLM explanations. High enough to hide provider
 # latency, low enough not to trip provider rate limits on a large top_k.
 _EXPLAIN_CONCURRENCY = 5
+
+# How many ranked jobs get an LLM explanation. Ranking scales to top_k (100);
+# explaining does not. At concurrency 5 and a 30s provider timeout, explaining
+# all of top_k meant ceil(100/5) x 30s = 10 minutes on the request path, with a
+# pooled DB connection held for the whole of it. Rank on top_k, explain the
+# head of the list, and let the tail carry scores with the static explanation.
+_MAX_EXPLAIN_JOBS = 20
 
 # How many eligible candidates to pull per requested result. Ranking is cheap;
 # the expensive part is the per-job LLM explanation, which only runs on top_k.
@@ -132,7 +139,7 @@ class CareerOSState(TypedDict):
 
 async def _discover_normalize_dedup_filter(state: CareerOSState, db: Session) -> CareerOSState:
     req = MatchRequest(**state["request"])
-    adapter = get_adapter()
+    adapter = get_adapter(req.sources)
     raw_postings = await adapter.search(req.query, req.location)
 
     for raw in raw_postings:
@@ -140,16 +147,17 @@ async def _discover_normalize_dedup_filter(state: CareerOSState, db: Session) ->
         # must not fail the whole match. Without this a single bad row failed the
         # node, and the request 500'd — the match path was stricter than search.
         try:
-            normalized = normalize_job(raw)
-            row, created = upsert_job(db, normalized)
+            with db.begin_nested():  # SAVEPOINT: a failure unwinds only this row
+                normalized = normalize_job(raw)
+                row, created = upsert_job(db, normalized)
             if created:
                 client = get_client()
                 index_job(client, row.id, row.title, row.description, row.skills_required or [])
         except Exception:
-            db.rollback()
             logger.exception(
                 "skipping job source=%s source_id=%s (ingest failed)", raw.source, raw.source_id
             )
+    commit_batch(db)
 
     # Filter in SQL rather than loading every row: this used to be
     # `select(Job)` + a Python pass over the whole table (audit A4). The Python
@@ -163,12 +171,19 @@ async def _discover_normalize_dedup_filter(state: CareerOSState, db: Session) ->
     candidates = db.execute(
         select(Job)
         .where(*build_sql_filters(search_req))
-        .order_by(Job.posted_at.is_(None), Job.posted_at.desc(), Job.created_at.desc())
+        .order_by(
+            Job.posted_at.is_(None), Job.posted_at.desc(), Job.created_at.desc(), Job.id.desc()
+        )
         .offset(req.offset)
         .limit(req.top_k * _CANDIDATE_OVERSAMPLE)
     ).scalars().all()
     filtered = apply_hard_filters(candidates, search_req)
     state["candidate_ids"] = [j.id for j in filtered]
+    # Release the pooled connection before the LLM fan-out. Without this the
+    # session held a transaction open — and under MySQL's REPEATABLE READ, a
+    # read view open for the whole request, which stalls the InnoDB purge thread
+    # and grows the undo log.
+    db.rollback()
     return state
 
 
@@ -204,6 +219,8 @@ async def _retrieve_and_rerank(state: CareerOSState, db: Session) -> CareerOSSta
     top = rerank(scored, top_k=req.top_k)
     state["ranked"] = [{"job_id": s.job_id, "keyword_score": s.keyword_score,
                          "semantic_score": s.semantic_score, "hybrid_score": s.hybrid_score} for s in top]
+    # Read-only node — same reasoning as _discover_normalize_dedup_filter.
+    db.rollback()
     return state
 
 
@@ -215,10 +232,21 @@ async def _evidence_and_explain(state: CareerOSState, db: Session) -> CareerOSSt
         model_name=req.model_name,
     )
 
+    # Batch-load the jobs to explain. This used to be one db.get() per ranked
+    # job inside the fan-out — an N+1 that the two call sites above already
+    # fixed, and that this one had missed. At top_k=100 it was 100 extra
+    # round-trips per request.
+    jobs_map: dict = {}
+    to_explain = state["ranked"][:_MAX_EXPLAIN_JOBS]
+    if to_explain:
+        rows = db.execute(
+            select(Job).where(Job.id.in_([e["job_id"] for e in to_explain]))
+        ).scalars().all()
+        jobs_map = {j.id: j for j in rows}
+    db.rollback()
+
     async def _explain_one(entry: dict) -> tuple[dict, object]:
-        # db.get is synchronous and completes before the await, so the shared
-        # Session is never touched across a suspension point.
-        job = db.get(Job, entry["job_id"])
+        job = jobs_map.get(entry["job_id"])
         if not job:
             return entry, None
         return entry, await router.explain_match(
@@ -231,12 +259,13 @@ async def _evidence_and_explain(state: CareerOSState, db: Session) -> CareerOSSt
         async with semaphore:
             return await _explain_one(entry)
 
-    # Bounded fan-out: one LLM round-trip per job, but in parallel. A serial
-    # loop here made /jobs/match latency O(top_k x provider latency).
+    # Bounded fan-out: one LLM round-trip per explained job, in parallel. A
+    # serial loop here made /jobs/match latency O(n x provider latency).
     explained = await asyncio.gather(
-        *(_explain_limited(entry) for entry in state["ranked"])
+        *(_explain_limited(entry) for entry in to_explain)
     )
 
+    # Anything past _MAX_EXPLAIN_JOBS is ranked but not explained.
     for entry, explanation in explained:
         if explanation is None:
             continue

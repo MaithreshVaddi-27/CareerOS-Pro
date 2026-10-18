@@ -23,6 +23,23 @@ from backend.services.sourcing.company_scraper import scrape_company_jobs
 logger = logging.getLogger("careeros")
 settings = get_settings()
 
+# Adzuna takes app_id/app_key as *query parameters*, and httpx's HTTPStatusError
+# stringifies the full request URL. Adzuna also returns 401 on a bad key, which
+# is not in get_with_retry's 429/5xx retry set, so raise_for_status() surfaces
+# straight into the error string. Both credentials are the first two params, so
+# they fit inside the monitor's 300-char truncation and were readable via
+# GET /agents/health. Scrub at the sink.
+_SECRET_QUERY_KEYS = ("app_id", "app_key", "api_key", "apikey", "token", "access_token")
+_SECRET_PARAM_RE = re.compile(
+    r"(?i)([?&](?:" + "|".join(_SECRET_QUERY_KEYS) + r")=)[^&\s'\"]+"
+)
+
+
+def _redact(text: str) -> str:
+    """Strip credential query params from an error string before it is stored in
+    the agent monitor, which /agents/health returns to the caller."""
+    return _SECRET_PARAM_RE.sub(r"\1***", text)[:300]
+
 # Use v2 endpoint per RapidAPI JSearch documentation
 # NOTE: Requires active RapidAPI subscription (free tier ~200 req/month)
 # Subscribe at: https://rapidapi.com/letscrape-6bRBa3QG1q/api/jsearch
@@ -331,6 +348,7 @@ class MultiSourceAdapter:
 
     async def search(self, query: str, location: str | None = None) -> list[RawJobPosting]:
         results: list[RawJobPosting] = []
+        start_all = time.monotonic()
 
         async def _tracked(adapter: JobSourceAdapter) -> list[RawJobPosting]:
             name = f"source:{type(adapter).__name__}"
@@ -340,17 +358,31 @@ class MultiSourceAdapter:
                 agent_monitor.record(name, ok=True, latency_ms=(time.monotonic() - start) * 1000)
                 return out
             except Exception as exc:
-                agent_monitor.record(name, ok=False, latency_ms=(time.monotonic() - start) * 1000, error=str(exc)[:300])
+                agent_monitor.record(
+                    name, ok=False,
+                    latency_ms=(time.monotonic() - start) * 1000,
+                    error=_redact(str(exc)),
+                )
                 raise
 
         outcomes = await asyncio.gather(
             *(_tracked(a) for a in self._adapters), return_exceptions=True
         )
+        ok = failed = 0
         for adapter, outcome in zip(self._adapters, outcomes):
             if isinstance(outcome, Exception):
-                logger.warning("job source %s failed: %s", type(adapter).__name__, outcome)
+                failed += 1
+                logger.warning("job source %s failed: %s", type(adapter).__name__, _redact(str(outcome)))
                 continue
+            ok += 1
             results.extend(outcome)
+        # One line per fan-out. /agents/health is per-process and nobody polls
+        # it, so without this the agent success rate is invisible in the logs —
+        # a fully broken source set looks identical to a quiet one.
+        logger.info(
+            "job sources done ok=%d failed=%d postings=%d elapsed_ms=%.0f",
+            ok, failed, len(results), (time.monotonic() - start_all) * 1000,
+        )
         return results
 
 
@@ -367,17 +399,26 @@ class SafeSingleSourceAdapter:
         try:
             return await self._adapter.search(query, location)
         except Exception as e:
-            logger.warning("job source %s failed: %s", type(self._adapter).__name__, e)
+            logger.warning("job source %s failed: %s", type(self._adapter).__name__, _redact(str(e)))
             return []
 
 
-def get_adapter() -> JobSourceAdapter:
+def get_adapter(sources: list[str] | None = None) -> JobSourceAdapter:
+    """Build the adapter fan-out.
+
+    `sources` narrows the fan-out for one request. It is intersected with
+    JOB_SOURCES rather than replacing it, so a caller cannot switch on a source
+    the operator deliberately left disabled (notably the scraper, which is the
+    slowest and least predictable of the six). Callers with no preference pass
+    None and get exactly the configured set.
+    """
     settings = get_settings()
     if settings.job_api_mode != "live":
         return MockJobAdapter()
 
     configured: list[JobSourceAdapter] = []
-    requested = {s.strip() for s in settings.job_sources.split(",") if s.strip()}
+    pool = {s.strip() for s in settings.job_sources.split(",") if s.strip()}
+    requested = pool if sources is None else ({s.strip() for s in sources if s.strip()} & pool)
 
     if "jsearch" in requested and settings.jsearch_api_key:
         configured.append(JSearchAdapter(settings.jsearch_api_key))
