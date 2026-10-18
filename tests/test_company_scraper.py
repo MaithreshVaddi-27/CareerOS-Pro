@@ -40,6 +40,48 @@ def scraper():
     return CompanyScraper(max_concurrency=2, jitter_max=0.0)
 
 
+def install_transport(scraper, handler):
+    """Route scraper requests through `handler`, with robots.txt stubbed to 404.
+
+    Stubbing robots.txt (a 404 means "no rules published", so allow) keeps the
+    page-call counters in the tests below honest without every one of them having
+    to know that a robots lookup happens at all. Tests that care about robots use
+    `robots=` instead.
+    """
+    original = scraper._get_client
+
+    async def route(request):
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)
+        return await handler(request)
+
+    def get_client():
+        c = original()
+        c._transport = httpx.MockTransport(route)
+        return c
+
+    scraper._get_client = get_client
+    return original
+
+
+def install_robots_transport(scraper, handler, robots_response):
+    """Same, but with an explicit robots.txt response for the robots tests."""
+    original = scraper._get_client
+
+    async def route(request):
+        if request.url.path == "/robots.txt":
+            return robots_response
+        return await handler(request)
+
+    def get_client():
+        c = original()
+        c._transport = httpx.MockTransport(route)
+        return c
+
+    scraper._get_client = get_client
+    return original
+
+
 def _patch_fetch(scraper, pages, calls):
     """Replace _fetch_html with a stub. `pages` maps url -> html or None."""
 
@@ -284,15 +326,7 @@ def test_fetch_uses_cache_and_does_not_refetch(scraper):
         return httpx.Response(200, text=CAREER_HTML)
 
     async def run():
-        transport = httpx.MockTransport(handler)
-        original = scraper._get_client
-
-        def get_client():
-            c = original()
-            c._transport = transport
-            return c
-
-        scraper._get_client = get_client
+        install_transport(scraper, handler)
         try:
             a = await scraper._fetch_html("https://acme.com/careers")
             b = await scraper._fetch_html("https://acme.com/careers")
@@ -316,14 +350,7 @@ def test_retry_happens_on_503_then_succeeds(scraper):
         return httpx.Response(200, text="<html>ok</html>")
 
     async def run():
-        original = scraper._get_client
-
-        def get_client():
-            c = original()
-            c._transport = httpx.MockTransport(handler)
-            return c
-
-        scraper._get_client = get_client
+        install_transport(scraper, handler)
         try:
             return await scraper._fetch_html("https://acme.com/careers")
         finally:
@@ -342,11 +369,188 @@ def test_404_is_not_retried(scraper):
         return httpx.Response(404)
 
     async def run():
+        install_transport(scraper, handler)
+        try:
+            return await scraper._fetch_html("https://acme.com/careers")
+        finally:
+            await scraper.aclose()
+
+    assert asyncio.run(run()) is None
+    assert len(attempts) == 1
+
+
+# ---------------------------------------------------------------------------
+# robots.txt (audit A6)
+# ---------------------------------------------------------------------------
+
+ROBOTS_DISALLOW_CAREERS = """
+User-agent: *
+Disallow: /careers
+Allow: /jobs
+"""
+
+
+def _fetch_with_robots(scraper, robots_text, url="https://acme.com/careers"):
+    """Fetch `url` with robots.txt serving `robots_text`; return (html, page_calls)."""
+    page_calls = []
+
+    async def handler(request):
+        page_calls.append(str(request.url))
+        return httpx.Response(200, text=CAREER_HTML)
+
+    async def run():
+        install_robots_transport(scraper, handler, httpx.Response(200, text=robots_text))
+        try:
+            return await scraper._fetch_html(url)
+        finally:
+            await scraper.aclose()
+
+    return asyncio.run(run()), page_calls
+
+
+def test_robots_disallow_prevents_the_fetch_entirely(scraper):
+    """The point of the fix: a disallowed path is never requested at all."""
+    html, page_calls = _fetch_with_robots(scraper, ROBOTS_DISALLOW_CAREERS)
+    assert html is None
+    assert page_calls == []
+
+
+def test_robots_allow_permits_the_fetch(scraper):
+    html, page_calls = _fetch_with_robots(scraper, "User-agent: *\nAllow: /\n")
+    assert html == CAREER_HTML
+    assert page_calls == ["https://acme.com/careers"]
+
+
+def test_robots_longer_match_wins_over_shorter_allow(scraper):
+    """`Allow: /jobs` must not unlock `/careers`."""
+    html, _ = _fetch_with_robots(scraper, ROBOTS_DISALLOW_CAREERS, "https://acme.com/jobs/1")
+    assert html == CAREER_HTML
+
+    html, page_calls = _fetch_with_robots(scraper, ROBOTS_DISALLOW_CAREERS)
+    assert html is None and page_calls == []
+
+
+def test_missing_robots_txt_allows_the_fetch(scraper):
+    """404 = no published rules, so nothing to obey (RFC 9309)."""
+    page_calls = []
+
+    async def handler(request):
+        page_calls.append(str(request.url))
+        return httpx.Response(200, text=CAREER_HTML)
+
+    async def run():
+        install_transport(scraper, handler)
+        try:
+            return await scraper._fetch_html("https://acme.com/careers")
+        finally:
+            await scraper.aclose()
+
+    assert asyncio.run(run()) == CAREER_HTML
+
+
+def test_robots_403_disallows_everything(scraper):
+    """401/403 is the site refusing to hand over the rules — not permission."""
+    page_calls = []
+
+    async def handler(request):
+        page_calls.append(str(request.url))
+        return httpx.Response(200, text=CAREER_HTML)
+
+    async def run():
+        install_robots_transport(scraper, handler, httpx.Response(403))
+        try:
+            return await scraper._fetch_html("https://acme.com/careers")
+        finally:
+            await scraper.aclose()
+
+    assert asyncio.run(run()) is None
+    assert page_calls == []
+
+
+def test_robots_is_fetched_once_per_origin(scraper):
+    robots_calls = []
+
+    async def handler(request):
+        return httpx.Response(200, text="User-agent: *\nAllow: /\n")
+
+    async def route(request):
+        if request.url.path == "/robots.txt":
+            robots_calls.append(str(request.url))
+            return httpx.Response(200, text="User-agent: *\nAllow: /\n")
+        return await handler(request)
+
+    async def run():
         original = scraper._get_client
 
         def get_client():
             c = original()
-            c._transport = httpx.MockTransport(handler)
+            c._transport = httpx.MockTransport(route)
+            return c
+
+        scraper._get_client = get_client
+        try:
+            await scraper._fetch_html("https://acme.com/careers")
+            await scraper._fetch_html("https://acme.com/jobs/1")
+            await scraper._fetch_html("https://acme.com/join-us")
+        finally:
+            await scraper.aclose()
+
+    asyncio.run(run())
+    assert robots_calls == ["https://acme.com/robots.txt"]
+
+
+def test_robots_5xx_allows_but_is_not_cached(scraper):
+    """Unavailable != permitted. Allow this once, but re-check next time rather
+    than inheriting a stale 'allow' for the life of the process."""
+    robots_calls = []
+
+    async def handler(request):
+        return httpx.Response(200, text=CAREER_HTML)
+
+    async def route(request):
+        if request.url.path == "/robots.txt":
+            robots_calls.append(str(request.url))
+            return httpx.Response(503)
+        return await handler(request)
+
+    async def run():
+        original = scraper._get_client
+
+        def get_client():
+            c = original()
+            c._transport = httpx.MockTransport(route)
+            return c
+
+        scraper._get_client = get_client
+        try:
+            first = await scraper._fetch_html("https://acme.com/careers")
+            scraper._cache_put("https://acme.com/careers", "")  # force a second lookup
+            second = await scraper._fetch_html("https://acme.com/jobs/1")
+            return first, second
+        finally:
+            await scraper.aclose()
+
+    first, second = asyncio.run(run())
+    assert first == second == CAREER_HTML
+    assert len(robots_calls) == 2
+
+
+def test_robots_survives_transport_failure(scraper):
+    """A network error on robots.txt must not take the whole scrape down."""
+    async def handler(request):
+        return httpx.Response(200, text=CAREER_HTML)
+
+    async def route(request):
+        if request.url.path == "/robots.txt":
+            raise httpx.ConnectError("boom")
+        return await handler(request)
+
+    async def run():
+        original = scraper._get_client
+
+        def get_client():
+            c = original()
+            c._transport = httpx.MockTransport(route)
             return c
 
         scraper._get_client = get_client
@@ -355,5 +559,29 @@ def test_404_is_not_retried(scraper):
         finally:
             await scraper.aclose()
 
-    assert asyncio.run(run()) is None
-    assert len(attempts) == 1
+    assert asyncio.run(run()) == CAREER_HTML
+
+
+def test_crawl_delay_is_honoured_and_capped(scraper, monkeypatch):
+    slept = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    async def handler(request):
+        return httpx.Response(200, text=CAREER_HTML)
+
+    async def run():
+        install_robots_transport(
+            scraper, handler, httpx.Response(200, text="User-agent: *\nCrawl-delay: 30\n")
+        )
+        try:
+            return await scraper._fetch_html("https://acme.com/careers")
+        finally:
+            await scraper.aclose()
+
+    assert asyncio.run(run()) == CAREER_HTML
+    # 30s requested, capped to 10s so one site cannot stall the pipeline.
+    assert slept == [10.0]

@@ -20,6 +20,7 @@ import re
 import time
 from typing import Dict, List, Optional
 from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.robotparser import RobotFileParser
 
 import httpx
 from bs4 import BeautifulSoup
@@ -56,7 +57,12 @@ _EMPLOYMENT_MARKERS = (
 
 
 class CompanyScraper:
-    """Scrapes job listings from company career pages."""
+    """Scrapes job listings from company career pages.
+
+    Every fetch is gated on the site's robots.txt (audit A6); a disallowed path is
+    never requested. Politeness comes from robots.txt plus a per-domain semaphore,
+    jitter, a TTL cache and a configurable User-Agent.
+    """
 
     # Probed in order; first pattern whose page yields job cards wins.
     # Override/extend via settings.company_career_page_patterns (comma-separated).
@@ -107,6 +113,8 @@ class CompanyScraper:
 
         self._domain_semaphores: Dict[str, asyncio.Semaphore] = {}
         self._html_cache: Dict[str, tuple[float, str]] = {}
+        # origin -> parsed rules, or None for "no usable robots.txt, allow all".
+        self._robots: Dict[str, Optional[RobotFileParser]] = {}
         self._client: Optional[httpx.AsyncClient] = None
 
     # -------------------------------------------------------------------------
@@ -195,22 +203,91 @@ class CompanyScraper:
             del self._html_cache[next(iter(self._html_cache))]
         self._html_cache[url] = (time.monotonic(), html)
 
+    async def _robots_parser(self, url: str) -> Optional[RobotFileParser]:
+        """Parsed robots.txt for this URL's origin, or None if there is nothing
+        usable to enforce.
+
+        Per RFC 9309: a 4xx means the site publishes no rules, so allow; a 5xx or
+        a transport failure means the rules are merely *unavailable*, which is not
+        the same as permission. Those are deliberately not cached, so the next run
+        re-checks rather than inheriting a stale "allow" for the life of the
+        process.
+        """
+        parsed = urlparse(url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        if origin in self._robots:
+            return self._robots[origin]
+
+        robots_url = urljoin(origin, "/robots.txt")
+        parser: Optional[RobotFileParser] = None
+        cacheable = False
+        try:
+            resp = await self._get_client().get(robots_url)
+            if resp.status_code == 200:
+                parser = RobotFileParser()
+                parser.parse(resp.text.splitlines())
+                cacheable = True
+            elif resp.status_code in (401, 403):
+                # 4xx other than 404: the site is explicitly refusing the rules.
+                # Treat as disallow-all rather than pretending it published none.
+                parser = RobotFileParser()
+                parser.parse(["User-agent: *", "Disallow: /"])
+                cacheable = True
+            elif resp.status_code < 500:
+                # 404 and friends: definitively no rules published, so allow.
+                logger.info("No robots.txt at %s (HTTP %s) — allowing", robots_url, resp.status_code)
+                cacheable = True
+            else:
+                # 5xx: unavailable, not permitted — allow now, re-check next time.
+                logger.info("robots.txt unavailable at %s (HTTP %s) — allowing", robots_url, resp.status_code)
+        except httpx.HTTPError as exc:
+            logger.info("robots.txt unreachable at %s (%s) — allowing", robots_url, exc)
+
+        if cacheable:
+            self._robots[origin] = parser
+        return parser
+
+    async def _robots_allows(self, url: str, parser: Optional[RobotFileParser]) -> bool:
+        """Gate `url` on the site's rules, honouring any crawl-delay.
+
+        Takes an already-fetched parser so a robots.txt that is unavailable
+        (5xx) is not re-requested twice per page.
+        """
+        if parser is None:
+            return True
+        user_agent = settings.company_scraper_user_agent.split("/")[0] or "*"
+        if not parser.can_fetch(user_agent, url):
+            logger.info("robots.txt disallows %s for %s — skipping", url, user_agent)
+            return False
+        delay = parser.crawl_delay(user_agent)
+        # ponytail: capped at 10s — a site asking for more would stall the
+        # pipeline for no benefit, and robots.txt is a courtesy, not a hard cap.
+        if delay:
+            await asyncio.sleep(min(float(delay), 10.0))
+        return True
+
     async def _fetch_html(self, url: str) -> Optional[str]:
         """Fetch one URL. Returns None on any non-recoverable failure.
 
-        Retries only on 429/5xx and transport errors, with exponential backoff
-        plus jitter. A fresh scraper gets a fresh empty cache.
+        Respects robots.txt before fetching (audit A6). Retries only on 429/5xx and
+        transport errors, with exponential backoff plus jitter. A fresh scraper
+        gets a fresh empty cache.
         """
         cached = self._cache_get(url)
         if cached is not None:
             return cached
 
+        # The per-domain semaphore is deliberately acquired *before* the robots
+        # fetch so that robots.txt lookups obey the same concurrency cap as pages.
         hostname = urlparse(url).hostname or ""
         domain_sem = self._domain_semaphores.setdefault(
             hostname, asyncio.Semaphore(self._per_domain_limit)
         )
 
         async with domain_sem:
+            if not await self._robots_allows(url, await self._robots_parser(url)):
+                return None
+
             client = self._get_client()
             for attempt in range(self._max_retries + 1):
                 try:

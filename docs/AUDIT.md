@@ -207,6 +207,28 @@ block or a complaint.
 (Greenhouse, Lever, Ashby, Workday public boards) — these are explicitly intended for
 machine consumption, and `COMPANY_CAREER_PAGE_PATTERNS` can point at them directly.
 
+> **Update — DONE.** `_fetch_html` now gates every fetch on
+> `urllib.robotparser.RobotFileParser`, keyed per origin and cached. A disallowed
+> path is never requested at all, so the probe of unlinked paths stops where the
+> site says it should. `Crawl-delay` is honoured too, capped at 10s so one
+> site's demand cannot stall the pipeline.
+>
+> The awkward part is what to do when `robots.txt` is unreachable, and the
+> distinction the tests pin down is that *unavailable is not permitted*:
+>
+> | robots.txt | Verdict | Cached? |
+> |---|---|---|
+> | 200 | parse and obey | yes |
+> | 404 / other 4xx | no rules published → allow | yes |
+> | 401 / 403 | site is refusing the rules → **disallow all** | yes |
+> | 5xx / transport error | unavailable → allow | **no** — re-check next fetch |
+>
+> 401/403 is the case worth arguing about. RFC 9309 only says 4xx means "no
+> rules", but a 403 is not "this site has no robots.txt", it is "you may not
+> have it". Treating it as permissive would make the check trivially bypassable
+> by any site that cares enough to block the file. The 5xx case is deliberately
+> not cached, so a transient outage does not become permanent permission.
+
 ---
 
 ### A7 — N+1 query in the explain node · P2
@@ -384,7 +406,7 @@ build.
 | 7 | Deterministic `skills_required` extraction | A9 | M |
 | 8 | ~~Tests for `core/middleware.py` (rate limit, auth, headers)~~ | A8 | **DONE** |
 | 9 | ~~Tests for the remaining untested routes and graph nodes~~ | A8 | **DONE** |
-| 10 | robots.txt compliance in the scraper | A6 | S |
+| 10 | ~~robots.txt compliance in the scraper~~ | A6 | **DONE** |
 | 11 | Resume endpoint for the human-review interrupt | A10 | S |
 
 ### Phase 4 — Hardening

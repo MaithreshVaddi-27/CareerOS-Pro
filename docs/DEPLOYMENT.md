@@ -272,6 +272,13 @@ Raise `COMPANY_SCRAPER_MAX_URL_PROBES`, or add the ATS path to
 `COMPANY_CAREER_PAGE_PATTERNS`. A 403 is usually bot detection — see
 [AUDIT.md](AUDIT.md#a6-career-page-scraping-has-no-robots-tolerance).
 
+**A company resolves to nothing and the log says "robots.txt disallows"**
+
+That is the scraper obeying the site, not a bug. Check
+`https://<company>/robots.txt` — a `Disallow: /careers` line will stop the probe
+dead. Point `COMPANY_CAREER_PAGE_PATTERNS` at a path the site allows, or use
+their ATS board (Greenhouse/Lever/Ashby) instead.
+
 **Frontend builds but shows no data**
 Check `VITE_API_BASE` points at the backend, and that CORS allows the frontend origin
 via `ALLOWED_ORIGINS`.
