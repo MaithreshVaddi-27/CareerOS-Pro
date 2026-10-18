@@ -18,7 +18,10 @@ const JOB_TYPE = [
 export default function SearchBar({ onSearch, loading }) {
   const [query, setQuery] = useState('');
   const [location, setLocation] = useState('');
-  const [jobType, setJobType] = useState('internship');
+  // Default to 'any'. Defaulting to 'internship' sent employment_type on every
+  // first search and hid every non-internship row, with no control appearing
+  // to explain the empty result set.
+  const [jobType, setJobType] = useState('any');
 
   const submit = (e) => {
     e?.preventDefault();

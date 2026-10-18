@@ -1,5 +1,5 @@
 import { motion, useMotionValue, useTransform } from 'framer-motion';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Tag from '../ui/Tag';
 import { useDragVelocity } from '../../hooks/useDragVelocity';
 import { project } from '../../utils/appleDesign';
@@ -48,12 +48,17 @@ export default function JobCard({ job, onOpen, onSave, saved = false }) {
   const isIntern = /intern/i.test(job.employment_type || '') || /intern/i.test(job.title || '');
   const x = useMotionValue(0);
   const saveOpacity = useTransform(x, [0, 120], [0, 1]);
+  // Optimistic local state: a swipe saves instantly, before the parent's `saved`
+  // prop round-trips. Tracked with the previous prop value and adjusted during
+  // render rather than in an effect — an effect would setState on every prop
+  // change and add a second cascading render, and React documents render-time
+  // adjustment as the intended pattern for "reset state when a prop changes".
   const [cardSaved, setCardSaved] = useState(saved);
-
-  // Keep local state in sync with external `saved` prop
-  useEffect(() => {
+  const [lastSaved, setLastSaved] = useState(saved);
+  if (saved !== lastSaved) {
+    setLastSaved(saved);
     setCardSaved(saved);
-  }, [saved]);
+  }
 
   const onRelease = (offset, velocity) => {
     // Project momentum forward (§6), decide save vs snap back

@@ -43,9 +43,10 @@ const EMP_TYPES = [
   { value: 'contract', label: 'Contract' },
   { value: 'temporary', label: 'Temporary' },
 ];
-// value must match the Job.source string actually stored in the DB —
-// company scraper stores 'company_scraper' (see services/company_scraper.py),
-// not 'company'. Using the wrong value here silently filters out every result.
+// Value must match the Job.source string actually stored in the DB —
+// the company scraper stores 'company_scraper' (services/sourcing/company_scraper.py),
+// not the 'company' name used in the JOB_SOURCES config list. Using the wrong
+// value here silently filters out every result.
 const SOURCES = ['jsearch', 'adzuna', 'remotive', 'remoteok', 'arbeitnow', 'company_scraper'];
 
 export default function Filters({ filters, onChange }) {

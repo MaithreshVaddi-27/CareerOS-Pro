@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { useRef } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { defaultSpring } from '../../utils/appleDesign';
 
 /**
@@ -9,13 +9,27 @@ import { defaultSpring } from '../../utils/appleDesign';
  */
 export default function SegmentedControl({ options, value, onChange, ariaLabel }) {
   const refs = useRef({});
+  const [pill, setPill] = useState({ left: 0, width: 0 });
 
-  // Compute pill position from the active segment's measured box
-  const getStyle = () => {
+  // Measure the active segment and mirror it into state.
+  //
+  // This was reading refs.current[value] straight out of render, which is wrong
+  // twice over: on first render the refs are still null so the pill renders at
+  // zero width, and on a value change nothing re-renders, so the pill stays put
+  // and only framer's `layout` projection papers over it. Measuring in a layout
+  // effect (and on resize) is the honest version — the pill geometry is real
+  // state that the next render can use.
+  const measure = useCallback(() => {
     const el = refs.current[value];
-    if (!el) return { left: 0, width: 0 };
-    return { left: el.offsetLeft, width: el.offsetWidth };
-  };
+    setPill(el ? { left: el.offsetLeft, width: el.offsetWidth } : { left: 0, width: 0 });
+  }, [value]);
+
+  useLayoutEffect(measure, [measure]);
+
+  useLayoutEffect(() => {
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [measure]);
 
   return (
     <div
@@ -28,7 +42,7 @@ export default function SegmentedControl({ options, value, onChange, ariaLabel }
         layout
         transition={defaultSpring}
         className="segmented-pill"
-        style={getStyle()}
+        style={pill}
       />
       {options.map((opt) => (
         <motion.button
@@ -37,7 +51,7 @@ export default function SegmentedControl({ options, value, onChange, ariaLabel }
           role="radio"
           aria-checked={opt.value === value}
           onClick={() => onChange(opt.value)}
-className="segmented-option"
+          className="segmented-option"
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.96 }}
           transition={{ type: 'spring', bounce: 0, duration: 0.2 }}

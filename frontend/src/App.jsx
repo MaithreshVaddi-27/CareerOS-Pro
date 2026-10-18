@@ -12,7 +12,7 @@ import { defaultSpring } from './utils/appleDesign';
 import { useReducedMotion } from './hooks/useReducedMotion';
 import './styles/globals.css';
 
-const LLM_PROVIDERS = ['auto', 'nvidia', 'openrouter', 'gemini', 'llama', 'none'];
+const LLM_PROVIDERS = ['auto', 'gemini', 'none'];
 
 export default function App() {
   const [view, setView] = useState('discover');
@@ -36,8 +36,13 @@ export default function App() {
     try {
       const data = await searchJobs({
         query: query.trim(),
-        location: location?.trim() || 'India',
-        employment_type: filters.employment_type || (jobType === 'any' ? '' : jobType) || undefined,
+        // Blank location means "anywhere". It used to default to the string
+        // 'India', which the backend then treated as a LIKE filter — every
+        // non-India posting vanished with no visible control explaining why.
+        location: location?.trim() || undefined,
+        // The advanced Employment-type control wins; the search-bar toggle is
+        // the fallback. 'any' must map to undefined, never to a filter value.
+        employment_type: filters.employment_type || (jobType === 'any' ? undefined : jobType),
         remote: filters.remote || 'any',
         experience_level: filters.experience_level || undefined,
         salary_min: filters.salary_min || undefined,
