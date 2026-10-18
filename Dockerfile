@@ -7,17 +7,21 @@ WORKDIR /app
 # dependency needs to compile from source, add it back deliberately rather than
 # carrying it for a dependency set that does not need it.
 
-RUN useradd -m careeros
-USER careeros
-
-# Copy requirements first for caching
-COPY --chown=careeros:careeros requirements.txt .
-
+# Install as root, before dropping privileges. Installing while already switched
+# to careeros put every package in ~/.local and left the console scripts
+# (uvicorn, pytest) off PATH — it worked only because the CMD happens to invoke
+# `python -m backend.run`. Anything that shells out to `uvicorn` would have
+# failed at runtime in the container and nowhere else.
+COPY requirements.txt requirements-dev.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code (no .env files — mount secrets at runtime).
-# backend/venv is excluded by .dockerignore, not here.
+RUN useradd -m careeros
+
+# Application code only; .dockerignore keeps backend/venv (585 MB of macOS
+# wheels, wrong platform for the image) out of the build context entirely.
 COPY --chown=careeros:careeros backend/ ./backend/
+
+USER careeros
 
 # Expose backend port
 EXPOSE 8000

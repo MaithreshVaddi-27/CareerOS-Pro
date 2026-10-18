@@ -33,7 +33,9 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        # Both files: requirements.txt is runtime-only (what the image installs),
+        # requirements-dev.txt adds the test runner the suite needs.
+        run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Lint (ruff)
         run: |
@@ -76,10 +78,10 @@ jobs:
 
   # Python and Node lock down reproducibility differently, and both need checking.
   #
-  # Python: requirements.txt carries exact `==` pins, because pip has no
-  # committed lockfile. With `>=` ranges the same commit resolves different
-  # packages on different days, so a green pipeline proves nothing about the
-  # image deployed last month.
+  # Python: requirements.txt and requirements-dev.txt carry exact `==` pins,
+  # because pip has no committed lockfile. With `>=` ranges the same commit
+  # resolves different packages on different days, so a green pipeline proves
+  # nothing about the image deployed last month.
   #
   # Node: package.json deliberately keeps `^` ranges — that is the npm
   # convention, and package-lock.json already records exact resolved versions
@@ -108,26 +110,27 @@ jobs:
 
           NAME = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*(.*)$")
           bad = []
-          for n, raw in enumerate(open("requirements.txt"), 1):
-              stripped = raw.strip()
-              if not stripped or stripped.startswith("#"):
-                  continue
-              if stripped.startswith("-"):
-                  bad.append(f"{n}: {stripped}  (options/editable installs are not allowed)")
-                  continue
-              line = stripped.split("#", 1)[0].split(";", 1)[0].strip()
-              m = NAME.match(line)
-              if not m:
-                  bad.append(f"{n}: {stripped}  (unparseable)")
-              elif not re.fullmatch(r"==\s*[A-Za-z0-9][A-Za-z0-9._+!-]*", m.group(2).strip()):
-                  bad.append(f"{n}: {stripped}  (needs a bare == pin, no range or wildcard)")
+          for req in ("requirements.txt", "requirements-dev.txt"):
+              for n, raw in enumerate(open(req), 1):
+                  stripped = raw.strip()
+                  if not stripped or stripped.startswith("#"):
+                      continue
+                  if stripped.startswith("-"):
+                      bad.append(f"{req}:{n}  {stripped}  (options/editable installs are not allowed)")
+                      continue
+                  line = stripped.split("#", 1)[0].split(";", 1)[0].strip()
+                  m = NAME.match(line)
+                  if not m:
+                      bad.append(f"{req}:{n}  {stripped}  (unparseable)")
+                  elif not re.fullmatch(r"==\s*[A-Za-z0-9][A-Za-z0-9._+!-]*", m.group(2).strip()):
+                      bad.append(f"{req}:{n}  {stripped}  (needs a bare == pin, no range or wildcard)")
 
           if bad:
-              print("::error::requirements.txt is not fully pinned:")
+              print("::error::dependency files are not fully pinned:")
               for b in bad:
                   print(b)
               sys.exit(1)
-          print("requirements.txt is fully pinned.")
+          print("All requirements are fully pinned.")
           PY
 
       - name: Node lockfile is in sync with package.json

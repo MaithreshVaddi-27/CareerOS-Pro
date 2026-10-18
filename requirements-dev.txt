@@ -1,0 +1,14 @@
+# Test-only dependencies, kept out of the production image.
+#
+# pytest and pytest-asyncio were in requirements.txt, so every production image
+# shipped a test runner it never calls. Split out so the backend image carries
+# only what it runs.
+#
+# requirements.txt still lists them as a comment pointer, because that file is
+# what CI installs — keeping one command for local dev and CI is worth more than
+# the DRY-ness of a single file. Install both:
+#
+#     pip install -r requirements.txt -r requirements-dev.txt
+
+pytest==9.1.1
+pytest-asyncio==1.4.0

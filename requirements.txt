@@ -27,8 +27,8 @@ langchain-core==1.6.0
 langgraph-checkpoint-mysql[aiomysql]==3.0.0
 redis==8.1.0
 
-# Test-only. Not needed at runtime, but they live in the one requirements file
-# so CI and the local venv cannot drift apart — the most common "works on my
-# machine" bug in a small project like this.
-pytest==9.1.1
-pytest-asyncio==1.4.0
+# Test-only deps (pytest, pytest-asyncio) live in requirements-dev.txt so the
+# production image does not ship a test runner. CI and local dev install both:
+#     pip install -r requirements.txt -r requirements-dev.txt
+#
+# The pinning gate in .github/workflows/ci.yml checks both files.
