@@ -121,6 +121,7 @@ beyond `conftest.py`.
 | `test_verification.py` | Liveness checking |
 | `test_retention.py` | Dry-run default, bounded batches, never touches active rows |
 | `test_pagination.py` | `limit`/`offset`/`top_k` bounds |
+| `test_routes.py` | Route handlers, error shapes, `/health` + `/health/ready` assembly |
 | `test_boundaries.py` | Import layering: core/services split, sourcing/matching independence |
 
 ### Conventions

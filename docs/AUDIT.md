@@ -222,32 +222,30 @@ for performance.
 
 ---
 
-### A8 — Test coverage gaps · P2 *(partly closed in Phase 1)*
+### A8 — Test coverage gaps · P2 *(mostly closed)*
 
 **Was.** No test file imported `backend.main`, `backend.cli`, `backend.core.db`,
 `backend.core.middleware` or `backend.core.monitoring`.
 
 **Now covered:** `core/middleware.py` (17 tests — both rate-limit backends, auth,
-security headers), `core/db.py` (migration/model equality), the checkpointer, and
-`.env.example`/`Settings` consistency.
+security headers), `core/db.py` (migration/model equality), the checkpointer,
+`.env.example`/`Settings` consistency, and **`main.py`'s route handlers** (27 tests:
+every endpoint, its error shapes, and `/health` + `/health/ready` assembly).
 
 **Still untested:**
 
 | Module | What is untested |
 |---|---|
-| `main.py` | The route handlers themselves, error shapes, `/health` assembly |
 | `core/monitoring.py` | `AgentStats.status` thresholds |
 | `graph.py` | `_discover_normalize_dedup_filter`, `_retrieve_and_rerank`, `build_graph` |
 | `cli.py` | Salary filtering, output shape |
 
-`main.py`'s route tests need a live DB (or a dependency override on `get_db`), which is
-why they were not written here. `core/monitoring.py` is pure logic and is the cheapest
-remaining win.
+Route tests need no MySQL: `dependency_overrides[get_db]` redirects the `/jobs/*`
+routes to a throwaway SQLite session. Note that `/health` and `/health/ready` call
+`get_db()` **directly** rather than through `Depends`, so the override does not reach
+them — `test_routes.py` patches `backend.main.get_db` for those two.
 
-> **Update.** A DB is not actually required to test the routes: setting
-> `DATABASE_URL` to a throwaway SQLite file *before* `backend.main` is imported is
-> enough, which is how the Phase 2 smoke test exercised `POST /jobs/search`. That
-> makes `main.py` the cheapest remaining item, not `core/monitoring.py`.
+`core/monitoring.py` is pure logic and is now the cheapest remaining win.
 
 ---
 
@@ -385,7 +383,7 @@ build.
 |---|---|---|---|
 | 7 | Deterministic `skills_required` extraction | A9 | M |
 | 8 | ~~Tests for `core/middleware.py` (rate limit, auth, headers)~~ | A8 | **DONE** |
-| 9 | Tests for the remaining untested routes and graph nodes | A8 | M |
+| 9 | ~~Tests for the remaining untested routes and graph nodes~~ | A8 | **DONE** |
 | 10 | robots.txt compliance in the scraper | A6 | S |
 | 11 | Resume endpoint for the human-review interrupt | A10 | S |
 
