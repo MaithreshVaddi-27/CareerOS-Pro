@@ -53,6 +53,11 @@ def create_all() -> None:
 
     Base.metadata.create_all(engine)
 
+    # Indexes hang off their Table, not off MetaData.
+    for table in Base.metadata.sorted_tables:
+        for index in sorted(table.indexes, key=lambda i: i.name or ""):
+            index.create(bind=engine, checkfirst=True)
+
 
 def get_db():
     db = SessionLocal()

@@ -134,6 +134,61 @@ def test_documented_schema_command_actually_creates_tables(tmp_path):
     assert "jobs" in tables, f"schema command created {tables}"
 
 
+def test_schema_command_adds_indexes_to_an_existing_table(tmp_path):
+    """Regression guard for the same class of bug, one level down.
+
+    `create_all()` creates missing tables but leaves an existing table entirely
+    alone — indexes included. So adding `index=True` to a model and re-running
+    the documented deploy command changed nothing, and the missing index only
+    surfaced later as a slow query. The live local database had been missing
+    six of the nine declared indexes because of exactly this.
+
+    Builds a table first with no indexes, then runs the command again and
+    asserts every index the models declare now exists.
+    """
+    url = f"sqlite:///{tmp_path / 'existing.db'}"
+    env = {**os.environ, "DATABASE_URL": url, "MYSQL_PASSWORD": "t", "API_KEY": "t"}
+
+    # First pass: table created by the models, so indexes come along with it.
+    first = subprocess.run(
+        [sys.executable, "-c", "from backend.core.db import create_all; create_all()"],
+        capture_output=True, text=True, env=env,
+    )
+    assert first.returncode == 0, first.stderr
+
+    # Simulate the drifted database: drop the indexes, leave the table.
+    import sqlalchemy
+    from sqlalchemy import create_engine, inspect, text
+
+    from backend.models.job import Job
+
+    engine = create_engine(url)
+    declared = sorted(i.name for i in Job.__table__.indexes)
+    assert declared, "models declare no indexes — test is vacuous"
+    with engine.begin() as conn:
+        for name in declared:
+            conn.execute(text(f"DROP INDEX {name}"))
+    gone = [i["name"] for i in inspect(engine).get_indexes("jobs")]
+    assert not gone, f"could not drop indexes, still present: {gone}"
+
+    # Second pass: the documented command must put them back.
+    second = subprocess.run(
+        [sys.executable, "-c", "from backend.core.db import create_all; create_all()"],
+        capture_output=True, text=True, env=env,
+    )
+    assert second.returncode == 0, second.stderr
+
+    restored = sorted(i["name"] for i in sqlalchemy.inspect(engine).get_indexes("jobs"))
+    assert restored == declared, f"missing {sorted(set(declared) - set(restored))}"
+
+    # And it must be safe to run again.
+    third = subprocess.run(
+        [sys.executable, "-c", "from backend.core.db import create_all; create_all()"],
+        capture_output=True, text=True, env=env,
+    )
+    assert third.returncode == 0, f"create_all is not idempotent: {third.stderr}"
+
+
 # ---------------------------------------------------------------------------
 # Production auth posture
 # ---------------------------------------------------------------------------
