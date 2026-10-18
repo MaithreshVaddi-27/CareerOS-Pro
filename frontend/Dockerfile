@@ -16,8 +16,13 @@ RUN npm run build
 # source in the final image, just the static output.
 FROM node:20-alpine AS runtime
 WORKDIR /app
-RUN npm install -g serve@14
-COPY --from=build /app/dist ./dist
+RUN npm install -g serve@14 \
+    && chown -R node:node /app
+# Run as non-root. serve binds 5173 (>1024) so it needs no privileges, and this
+# matches the backend image. Only the copied dist tree is owned by node, so a
+# compromise of the static server has nothing else to reach.
+USER node
+COPY --from=build --chown=node:node /app/dist ./dist
 EXPOSE 5173
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget -qO- http://127.0.0.1:5173/ >/dev/null 2>&1 || exit 1

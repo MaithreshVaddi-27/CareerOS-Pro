@@ -62,5 +62,76 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint (oxlint)
+        # The backend has Ruff; the frontend had no lint gate at all, so unused
+        # imports and undefined names were only caught at build time or review.
+        # oxlint is already a pinned devDependency in package.json — no extra
+        # install, and the version can't drift from what devs run locally.
+        # --deny correctness gates the rules that catch real bugs; the full
+        # default set is deliberately not denied, as it is mostly style.
+        run: npx --no-install oxlint --deny correctness src/
+
       - name: Build
         run: npm run build
+
+  # Python and Node lock down reproducibility differently, and both need checking.
+  #
+  # Python: requirements.txt carries exact `==` pins, because pip has no
+  # committed lockfile. With `>=` ranges the same commit resolves different
+  # packages on different days, so a green pipeline proves nothing about the
+  # image deployed last month.
+  #
+  # Node: package.json deliberately keeps `^` ranges — that is the npm
+  # convention, and package-lock.json already records exact resolved versions
+  # for every transitive dep. `npm ci` installs from the lockfile and hard-fails
+  # if it has drifted from package.json, so the lockfile sync check is the
+  # equivalent gate.
+  dependencies-pinned:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Every Python dependency is exactly pinned
+        # Written as a parser rather than a grep: a regex has to enumerate every
+        # way a requirement can be unpinned (>=, ~=, !=, bare, wildcard, -e) and
+        # gets that enumeration wrong in ways that either pass a range or reject
+        # a good pin. This asks the one question that matters — does every
+        # requirement use `==` and nothing else?
+        run: |
+          python - <<'PY'
+          import re, sys
+
+          NAME = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*(.*)$")
+          bad = []
+          for n, raw in enumerate(open("requirements.txt"), 1):
+              stripped = raw.strip()
+              if not stripped or stripped.startswith("#"):
+                  continue
+              if stripped.startswith("-"):
+                  bad.append(f"{n}: {stripped}  (options/editable installs are not allowed)")
+                  continue
+              line = stripped.split("#", 1)[0].split(";", 1)[0].strip()
+              m = NAME.match(line)
+              if not m:
+                  bad.append(f"{n}: {stripped}  (unparseable)")
+              elif not re.fullmatch(r"==\s*[A-Za-z0-9][A-Za-z0-9._+!-]*", m.group(2).strip()):
+                  bad.append(f"{n}: {stripped}  (needs a bare == pin, no range or wildcard)")
+
+          if bad:
+              print("::error::requirements.txt is not fully pinned:")
+              for b in bad:
+                  print(b)
+              sys.exit(1)
+          print("requirements.txt is fully pinned.")
+          PY
+
+      - name: Node lockfile is in sync with package.json
+        # --dry-run so this validates without reinstalling; npm ci already exits
+        # non-zero on drift. --ignore-scripts because the check is about version
+        # resolution, and lifecycle scripts are not.
+        run: npm ci --prefix frontend --ignore-scripts --dry-run

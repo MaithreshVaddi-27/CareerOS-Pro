@@ -1,24 +1,22 @@
 FROM python:3.12-slim
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+# No build toolchain. Every pinned dependency ships a cp312 manylinux wheel, so
+# build-essential was ~500 MB of dead weight that nothing used. If a future
+# dependency needs to compile from source, add it back deliberately rather than
+# carrying it for a dependency set that does not need it.
 
-# Create non-root user
 RUN useradd -m careeros
 USER careeros
 
 # Copy requirements first for caching
 COPY --chown=careeros:careeros requirements.txt .
 
-# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code (no .env files — mount secrets at runtime)
+# Copy application code (no .env files — mount secrets at runtime).
+# backend/venv is excluded by .dockerignore, not here.
 COPY --chown=careeros:careeros backend/ ./backend/
 
 # Expose backend port
