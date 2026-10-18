@@ -57,6 +57,10 @@ python run.py
 > again after any change that adds or widens a column. Skipping it means the first
 > query fails on a missing table.
 >
+> It creates missing tables **and** missing indexes, so adding `index=True` to a
+> model and re-running this does take effect on an existing database. It does not
+> ALTER columns, drop tables, or change column types.
+>
 > Always use `create_all()`. The older
 > `from backend.core.db import Base, engine; Base.metadata.create_all(engine)` form
 > **exits 0 and creates nothing**: `Base` alone has an empty metadata registry,
@@ -288,7 +292,8 @@ root and that both are set. `run.py` reads `.env` before importing `config`, but
 
 **`Data too long for column 'source_id'`**
 The live table predates a widened model column. `create_all()` creates missing
-tables but does **not** alter existing ones, so this needs a manual `ALTER`:
+tables and indexes but does **not** alter existing columns, so this needs a
+manual `ALTER`:
 
 ```sql
 ALTER TABLE jobs MODIFY source_id VARCHAR(512);

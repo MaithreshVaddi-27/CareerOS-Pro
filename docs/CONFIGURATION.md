@@ -247,8 +247,8 @@ as `list[str]` would require `["a","b"]` in `.env` and silently break the common
 ALTER TABLE jobs MODIFY source_id VARCHAR(512);
 ```
 
-`create_all()` creates missing tables but will not alter existing ones, so a live
-database needs this by hand. See [DEPLOYMENT.md](DEPLOYMENT.md#troubleshooting).
+`create_all()` creates missing tables and missing indexes, but will not alter
+existing columns, so a live database needs this by hand. See [DEPLOYMENT.md](DEPLOYMENT.md#troubleshooting).
 
 ---
 

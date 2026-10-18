@@ -10,6 +10,13 @@ crash. They returned `200`, exited `0`, or rendered fine while doing nothing use
 
 ## Critical
 
+- **`create_all()` created tables but not indexes.** It left an existing table
+  entirely alone, indexes included, so adding `index=True` to a model and
+  re-running the documented deploy command changed nothing — the missing index
+  surfaces only later as a slow query. The live local database was missing **six
+  of the nine** declared indexes because of this. `create_all()` now also creates
+  missing indexes (`checkfirst=True`, so re-running is a no-op). Column types still
+  need a manual `ALTER`; this pass covers tables and indexes.
 - **Deploying created no schema, and reported success.** Every deploy doc said to run
   `Base.metadata.create_all(engine)`. `Base` is an empty registry until a model module
   imports, so that command exited `0` having created zero tables. Every other test

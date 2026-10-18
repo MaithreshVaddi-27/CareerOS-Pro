@@ -125,6 +125,14 @@ imported, so anything that calls `create_all` without importing the models first
 creates **zero tables and exits 0**. `tests/test_hardening.py` runs the
 documented command in a clean subprocess to keep that failure from returning.
 
+It also loops over `Base.metadata.sorted_tables` and creates each declared index
+with `checkfirst=True`. `create_all()` alone leaves an existing table entirely
+alone — indexes included — so adding `index=True` to a model and re-running the
+deploy command changed nothing on an existing database, and the missing index
+only surfaced later as a slow query. The live development database was missing
+six of the nine declared indexes because of exactly that. Column types still need
+a manual `ALTER`; this pass covers tables and indexes.
+
 ---
 
 ## 3. Data flow
@@ -346,8 +354,8 @@ long-lived worker.
 - **No DDL at startup.** The lifespan creates no tables, so an environment cannot
   drift silently. Run
   `python -c "from backend.core.db import create_all; create_all()"` as a deploy step.
-  It only *creates* missing tables — widening an existing column is a manual
-  reviewed `ALTER`.
+  It creates missing tables and missing indexes; widening an existing column is
+  still a manual reviewed `ALTER`.
 - **`_CompanyScraperAdapter` is defined after `get_adapter()` references it.** Fine —
   the name resolves at call time.
 - **MySQL only.** `resolved_database_url` raises rather than falling back. A silent

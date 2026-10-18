@@ -31,8 +31,9 @@ python -c "from backend.core.db import create_all; create_all()"   # apply new t
 
 Use `create_all()`, never `Base.metadata.create_all(engine)` — the latter exits `0`
 and creates nothing, because `Base` has no models registered until they are imported.
-`create_all()` also only *creates*; widening an existing column needs a manual
-`ALTER` (see [DEPLOYMENT.md](DEPLOYMENT.md#troubleshooting)).
+`create_all()` also creates missing *indexes*, so `index=True` takes effect on
+re-run. It does not `ALTER` columns — widening one needs manual SQL (see
+[DEPLOYMENT.md](DEPLOYMENT.md#troubleshooting)).
 
 ### Why the pin
 
