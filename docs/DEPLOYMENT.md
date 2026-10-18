@@ -44,7 +44,7 @@ API_KEY=choose-a-long-random-string
 python -m venv backend/venv
 source backend/venv/bin/activate
 pip install -r requirements.txt
-alembic upgrade head          # create the schema
+python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"          # create the schema
 python run.py
 ```
 
@@ -52,7 +52,7 @@ python run.py
 `127.0.0.1:8000`.
 
 > **The app does not create tables.** Schema is owned by Alembic. Run
-> `alembic upgrade head` after cloning, and again after pulling any change that adds a
+> `python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"` after cloning, and again after pulling any change that adds a
 > revision. Skipping it means the first query fails on a missing `jobs` table.
 
 Optional flags:
@@ -82,13 +82,13 @@ docker run -d --name careeros-mysql \
 Or point `MYSQL_HOST` at an existing instance. Then create the schema:
 
 ```bash
-alembic upgrade head
+python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"
 ```
 
 Before pulling a change that adds a migration, run it as part of your deploy:
 
 ```bash
-alembic upgrade head && python run.py
+python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)" && python run.py
 ```
 
 ### 4. Frontend
@@ -109,7 +109,7 @@ Runs MySQL, the backend and the frontend together.
 ```bash
 cp .env.example .env      # edit MYSQL_PASSWORD + API_KEY
 docker compose up --build
-docker compose exec backend alembic upgrade head
+docker compose exec backend python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"
 ```
 
 Redis for shared rate-limit counters is behind a profile, so it stays optional:
@@ -138,7 +138,7 @@ The compose file builds from the repo-root `Dockerfile` for the backend and
 
 ### Checklist
 
-- [ ] `alembic upgrade head` run against the deployed database
+- [ ] `python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"` run against the deployed database
 - [ ] `APP_ENV=production` — enables durable MySQL checkpoints
 - [ ] `CHECKPOINT_STRICT=true` — fail fast rather than lose checkpoints silently
 - [ ] `REDIS_URL` set **if** running more than one worker
@@ -281,12 +281,12 @@ root and that both are set. `run.py` reads `.env` before importing `config`, but
 The table predates a widened model column. Run the revision that widens it:
 
 ```bash
-alembic upgrade head
+python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"
 ```
 
-If no such revision exists, the model and migrations have drifted — `alembic check`
+If no such revision exists, the model and migrations have drifted — `schema review`
 will say so. Generate one with
-`alembic revision --autogenerate -m "widen source_id to 512"`, review it, and commit.
+`schema migration (manual) -m "widen source_id to 512"`, review it, and commit.
 
 **Checkpoints not surviving restarts**
 Either `APP_ENV=development` (in-memory by design), or MySQL 9.x. Check `/health` —

@@ -163,7 +163,7 @@ async def _discover_normalize_dedup_filter(state: CareerOSState, db: Session) ->
     candidates = db.execute(
         select(Job)
         .where(*build_sql_filters(search_req))
-        .order_by(Job.posted_at.desc().nullslast(), Job.created_at.desc())
+        .order_by(Job.posted_at.is_(None), Job.posted_at.desc(), Job.created_at.desc())
         .offset(req.offset)
         .limit(req.top_k * _CANDIDATE_OVERSAMPLE)
     ).scalars().all()

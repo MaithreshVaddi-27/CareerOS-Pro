@@ -35,9 +35,8 @@ _warn_if_unsafe_rate_limit_config()
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    # No schema DDL here. Alembic is the single source of truth for schema —
-    # run `alembic upgrade head` as a deploy step. Startup DDL (create_all +
-    # a widen-VARCHAR patch) was what let environments drift apart silently.
+    # Schema is managed externally (create tables from models or your DBA).
+    # No startup DDL here — keeps environments from drifting silently.
     yield  # Application runs here
     # Shutdown: close reusable HTTP clients, and the checkpointer's context
     # manager. The saver was stored in graph._checkpointer_singleton["cm"] and
@@ -200,7 +199,7 @@ async def search_jobs(req: SearchRequest, db: Session = Depends(get_db)):
     candidate_jobs = db.execute(
         select(Job)
         .where(*build_sql_filters(req))
-        .order_by(Job.posted_at.desc().nullslast(), Job.created_at.desc())
+        .order_by(Job.posted_at.is_(None), Job.posted_at.desc(), Job.created_at.desc())
         .offset(req.offset)
         .limit(req.limit)
     ).scalars().all()

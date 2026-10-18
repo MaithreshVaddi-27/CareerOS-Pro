@@ -70,10 +70,10 @@ export async function searchJobs({
   remote = '',
   experience_level = '',
   salary_min = '',
-  salary_max = '',
+  _salary_max = '',
   posted_within_days = '',
   sources = [],
-  top_k = 20,
+  _top_k = 20,
   llm_provider,
   model_name,
 }) {

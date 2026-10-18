@@ -246,11 +246,11 @@ as `list[str]` would require `["a","b"]` in `.env` and silently break the common
 generate and review a revision:
 
 ```bash
-alembic revision --autogenerate -m "widen source_id to 512"
-alembic upgrade head
+schema migration (manual) -m "widen source_id to 512"
+python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"
 ```
 
-`alembic check` exits non-zero if the models and the migrations have drifted; it also
+`schema review` exits non-zero if the models and the migrations have drifted; it also
 runs in CI. Never edit a revision that has been applied anywhere — add a new one.
 
 ---
@@ -266,6 +266,6 @@ runs in CI. Never edit a revision that has been applied anywhere — add a new o
 - [ ] `.env` is not committed — it is gitignored (`.env.*` is ignored, so
       `.env.production` and `.env.staging` are covered too; `.env.example` is not)
 - [ ] `COMPANY_SCRAPER_USER_AGENT` identifies you with a contact URL
-- [ ] `alembic upgrade head` has been run against the deployed database
+- [ ] `python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"` has been run against the deployed database
 - [ ] A recurring `python -m backend.retention --days N --yes` job is scheduled, so
       `is_active = false` rows do not accumulate without bound

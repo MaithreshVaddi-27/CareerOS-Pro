@@ -325,7 +325,7 @@ long-lived worker.
 | An ATS layout | Add the path to `COMPANY_CAREER_PAGE_PATTERNS`. No code change. |
 | A hard filter | Add to `filters.py` and to the `SearchRequest` schema. |
 | An LLM provider | Implement `LLMProvider` in `model_router.py`, add to `_get_provider()` and the fallback chain. |
-| A table | Add to `models/`, re-export from `models/__init__.py`, then `alembic revision --autogenerate -m "add X"`. |
+| A table | Add to `models/`, re-export from `models/__init__.py`, then `schema migration (manual) -m "add X"`. |
 | A response field | Add to `schemas/job.py`. It propagates to the OpenAPI schema automatically. |
 
 ---
@@ -338,7 +338,7 @@ long-lived worker.
 - **`main.py` imports routes' dependencies inside the handler.** Deliberate: it keeps
   `import backend.main` cheap and avoids import cycles between the app and the graph.
 - **Alembic owns the schema.** The app runs no DDL at startup. Run
-  `alembic upgrade head` as a deploy step; `alembic check` fails CI if the models and
+  `python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"` as a deploy step; `schema review` fails CI if the models and
   the revisions drift.
 - **`_CompanyScraperAdapter` is defined after `get_adapter()` references it.** Fine —
   the name resolves at call time.

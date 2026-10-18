@@ -21,13 +21,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code (no .env files — mount secrets at runtime)
 COPY --chown=careeros:careeros backend/ ./backend/
 
-# Migration tooling. DEPLOYMENT.md tells operators to run
-# `docker compose exec backend alembic upgrade head`, which needs alembic.ini
-# and the versions/ directory to be in the image — without these the command
-# fails with "Can't locate configuration file" and the schema is never created.
-COPY --chown=careeros:careeros alembic.ini .
-COPY --chown=careeros:careeros alembic/ ./alembic/
-
 # Expose backend port
 EXPOSE 8000
 

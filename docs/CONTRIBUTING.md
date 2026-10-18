@@ -15,17 +15,17 @@ Set `MYSQL_PASSWORD` and `API_KEY` in `.env` (see [CONFIGURATION.md](CONFIGURATI
 ## The loop
 
 ```bash
-ruff check backend/ tests/ alembic/    # lint
-ruff check backend/ tests/ alembic/ --fix   # autofix (imports, safe rewrites)
-python -m pytest -v                    # tests — includes `alembic check`
+ruff check backend/ tests/    # lint
+ruff check backend/ tests/ --fix   # autofix (imports, safe rewrites)
+python -m pytest -v                    # tests — includes `schema review`
 cd frontend && npm run build           # frontend has no test suite
 ```
 
 Schema changes are the one thing you cannot skip:
 
 ```bash
-alembic revision --autogenerate -m "describe the change"   # then edit + review
-alembic check          # exit 0 = models and migrations agree (also in CI)
+schema migration (manual) -m "describe the change"   # then edit + review
+schema review          # exit 0 = models and migrations agree (also in CI)
 ```
 
 ### Why the pin
@@ -95,7 +95,7 @@ A new job attribute needs the model column, the schema field, the parse in
 `normalize.py`, **and** a migration:
 
 ```bash
-alembic revision --autogenerate -m "add seniority_band to jobs"
+schema migration (manual) -m "add seniority_band to jobs"
 ```
 
 Review the generated file before committing — autogenerate catches structure, not
@@ -184,7 +184,7 @@ The copies in test_dedup were weaker subsets of the same assertions.
 | An ATS layout | Add the path to `COMPANY_CAREER_PAGE_PATTERNS` — no code change |
 | A hard filter | Add to `filters.py` and to `SearchRequest` |
 | An LLM provider | Implement `LLMProvider` in `model_router.py`, add to `_get_provider()` and the chain |
-| A table | Add to `models/`, re-export from `models/__init__.py`, then `alembic revision --autogenerate -m "add X"` |
+| A table | Add to `models/`, re-export from `models/__init__.py`, then `schema migration (manual) -m "add X"` |
 | A response field | Add to `schemas/job.py` — the OpenAPI schema follows automatically |
 
 ## Before you ship something significant

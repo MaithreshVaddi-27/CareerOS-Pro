@@ -145,13 +145,12 @@ docker run -d --name careeros-mysql \
   -e MYSQL_PASSWORD=your-password \
   -p 3306:3306 mysql:8
 
-alembic upgrade head                     # create the schema
+python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"  # create the schema
 python run.py                            # → http://127.0.0.1:8000
 ```
 
-> The app runs **no DDL at startup** — Alembic owns the schema. Run
-> `alembic upgrade head` after cloning, and again after pulling any change that adds a
-> migration. See [DEPLOYMENT.md](docs/DEPLOYMENT.md).
+> The app runs **no DDL at startup** — create tables from the SQLAlchemy models
+> (see [DEPLOYMENT.md](docs/DEPLOYMENT.md)).
 
 Interactive API docs: <http://127.0.0.1:8000/docs>
 
@@ -170,7 +169,7 @@ Set `VITE_API_BASE=http://127.0.0.1:8000` in `frontend/.env`.
 ```bash
 cp .env.example .env                     # then edit MYSQL_PASSWORD + API_KEY
 docker compose up --build
-docker compose exec backend alembic upgrade head
+docker compose exec backend python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"
 ```
 
 Add `--profile ratelimit` to also start Redis for shared rate-limit counters (then set
@@ -446,10 +445,10 @@ python -m backend.cli "Acme Corp" --location Berlin --max-concurrency 2
 source backend/venv/bin/activate
 pip install "ruff==0.17.1"
 
-ruff check backend/ tests/ alembic/       # lint
-ruff check backend/ tests/ alembic/ --fix
-python -m pytest -v                      # tests — includes the migration-drift check
-alembic check                            # models vs migrations (also in CI)
+ruff check backend/ tests/       # lint
+ruff check backend/ tests/ --fix
+python -m pytest -v                      # tests
+
 ```
 
 Ruff is **pinned in CI on purpose**. Its default rule set changed drastically in 0.17,
