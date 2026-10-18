@@ -189,5 +189,7 @@ The copies in test_dedup were weaker subsets of the same assertions.
 
 ## Before you ship something significant
 
-Read [AUDIT.md](AUDIT.md). Several limitations listed there will silently affect new
-features — notably the absence of database migrations and the per-process rate limiter.
+Two limitations will silently affect new features: the rate limiter is per-process
+unless `REDIS_URL` is set, and the LangGraph checkpoint saver downgrades to in-memory on
+MySQL 9.x unless `CHECKPOINT_STRICT=true`. Both are documented in
+[DEPLOYMENT.md](DEPLOYMENT.md).

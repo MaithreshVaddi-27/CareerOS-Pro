@@ -61,8 +61,9 @@ Optional flags:
 python run.py --host 0.0.0.0 --port 8080 --reload --workers 4
 ```
 
-> `--workers > 1` makes rate limiting per-process. See
-> [AUDIT.md](AUDIT.md#a2-rate-limiting-is-per-process).
+> `--workers > 1` makes rate limiting per-process — each worker keeps its own
+> counters, so the effective ceiling is `RATE_LIMIT_PER_MINUTE x workers`. Set
+> `REDIS_URL` to share one counter across workers.
 
 ### 3. MySQL
 
@@ -174,7 +175,7 @@ The compose file builds from the repo-root `Dockerfile` for the backend and
 > Treat it as a shared quota token, not a credential. If you need real
 > identity — per-user data, private resume uploads, anything you would be
 > uncomfortable seeing in a public JS bundle — that needs session auth, which
-> this stack does not have. See AUDIT A11.
+> this stack does not have.
 >
 > If you would rather not ship the key at all, set `API_KEY=` empty in `.env`
 > and the frontend stops sending it; the backend's `require_api_key` becomes a
@@ -300,8 +301,8 @@ one bucket. Confirm `REDIS_URL` if you run multiple workers. Then check
 **Career page returns nothing**
 Run the CLI against that company to see which URL it resolves to and what it parses.
 Raise `COMPANY_SCRAPER_MAX_URL_PROBES`, or add the ATS path to
-`COMPANY_CAREER_PAGE_PATTERNS`. A 403 is usually bot detection — see
-[AUDIT.md](AUDIT.md#a6-career-page-scraping-has-no-robots-tolerance).
+`COMPANY_CAREER_PAGE_PATTERNS`. A 403 is usually bot detection; the scraper obeys
+`robots.txt` and will not try to work around a block.
 
 **A company resolves to nothing and the log says "robots.txt disallows"**
 
@@ -324,5 +325,4 @@ fixtures. In `live` mode with no credentials configured, only the free sources r
 
 - [CONFIGURATION.md](CONFIGURATION.md) — every variable
 - [API.md](API.md) — endpoint reference
-- [AUDIT.md](AUDIT.md) — known limitations before you deploy
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how it fits together

@@ -30,8 +30,9 @@ Fixed-window, per client IP, applied by `RateLimitMiddleware`. `/health` is exem
 - Burst allowance: `2 ×` the per-minute limit within a 10-second window
 - Response: `429` with `Retry-After: 60`
 
-Counters live in Redis when `REDIS_URL` is set, otherwise in-process. See
-[AUDIT.md](AUDIT.md#a2-rate-limiting-is-per-process) and
+Counters live in Redis when `REDIS_URL` is set, otherwise in-process — and in-process
+counters are **per worker**, so `--workers > 1` multiplies the effective limit by the
+worker count unless `REDIS_URL` is set. See
 [CONFIGURATION.md](CONFIGURATION.md#security-and-networking). `/health` reports which
 backend is active.
 
@@ -251,4 +252,4 @@ pass can over-match on short location codes (see below) but never under-match.
 > The Python pass rejects both, so results are correct — just with a few extra rows
 > read. The affected needles are enumerated in `tests/test_filters_sql.py`.
 
-See [AUDIT.md](AUDIT.md#a5-no-pagination) for the original finding.
+`limit`/`offset` were added for this; see [ARCHITECTURE.md](ARCHITECTURE.md).

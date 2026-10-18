@@ -197,8 +197,8 @@ before the first `await`, so it is never held across a suspension point.
 
 The fallback is deliberate: MySQL 9.x rejects MD5 in generated columns, which breaks
 `AIOMySQLSaver.setup()`. Degrading is better than 500-ing every request — but it does
-mean a misconfigured production deploy silently loses checkpoint durability. See
-[AUDIT.md](AUDIT.md#a3-silent-checkpoint-downgrade).
+mean a misconfigured production deploy silently loses checkpoint durability — which is
+why `CHECKPOINT_STRICT=true` turns the downgrade into a refusal to start.
 
 ---
 

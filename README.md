@@ -108,7 +108,7 @@ ready-to-apply.
 |---|---|---|
 | Python | 3.12 | Backend runtime |
 | Node.js | 20+ | Frontend build |
-| MySQL | 8.0+ | System of record. SQLite/Postgres are **not** supported. |
+| MySQL | 8.0+ | System of record for every deployment. |
 
 ### 1. Configure
 
@@ -263,12 +263,17 @@ All routes except `/health*` require the `X-API-Key` header.
   "remote_only": false,
   "min_salary": 0,
   "posted_within_days": 30,
-  "sources": ["jsearch", "company"], // optional; defaults to JOB_SOURCES
+  "sources": ["jsearch", "company_scraper"], // optional; defaults to JOB_SOURCES
   "limit": 50,                       // 1..200, default 50
   "offset": 0                        // default 0
 }
 // → [ JobOut, … ]   (at most `limit` rows)
 ```
+
+`sources` filters on the **stored** `Job.source` value, not on the `JOB_SOURCES`
+enable name. The two differ for exactly one source: the career-page scraper is enabled
+by `company` in `JOB_SOURCES` but writes rows tagged `company_scraper`. Every other
+source uses the same name in both places.
 
 Filtering happens in SQL against indexed columns, and `/jobs/match` no longer loads
 the whole table. `limit`/`offset` cap how many rows come back; the response shape is
@@ -370,7 +375,7 @@ a failing source degrades to an empty result and never fails the request.
 | `remotive` | none | Remote-first, generous limits. |
 | `remoteok` | none | Remote-only, no key needed. |
 | `arbeitnow` | none | EU-focused, no key needed. |
-| `company` | none | Scrapes the company's own career pages. |
+| `company` | none | Scrapes the company's own career pages. Rows are tagged `company_scraper`. |
 
 Set `JOB_API_MODE=mock` for offline development — returns a deterministic fixture set
 and performs no network I/O.
@@ -467,7 +472,6 @@ Workflow, conventions and the review checklist: **[docs/CONTRIBUTING.md](docs/CO
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every environment variable, defaults and interactions |
 | [docs/API.md](docs/API.md) | Endpoint reference, request/response shapes, error semantics |
 | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | Dev workflow, testing conventions, PR checklist |
-| [docs/AUDIT.md](docs/AUDIT.md) | **Deep audit**: known weaknesses, degradation behaviour, upgrade path |
 
 ---
 
@@ -485,10 +489,9 @@ health and agent monitoring, CI.
 the authoritative Python pass then rejects those rows, so results stay correct at a
 small cost in rows read. The vector store falls back to a local in-process
 implementation; the human-review interrupt is wired but the resume path is not yet
-exposed over HTTP. Inactive rows accumulate between retention runs.
-
-These are tracked with severity and remediation cost in
-**[docs/AUDIT.md](docs/AUDIT.md)**.
+exposed over HTTP. Inactive rows accumulate between retention runs. Timestamps are
+stored as naive `DateTime` in MySQL, so a deployment spanning a DST boundary can
+displace "posted within N days" by an hour.
 
 ---
 
