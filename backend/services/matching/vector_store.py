@@ -15,7 +15,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as qm
 
 from backend.core.config import get_settings
-from backend.services.embeddings import EmbeddingProvider, get_embedding_provider
+from backend.services.matching.embeddings import EmbeddingProvider, get_embedding_provider
 
 COLLECTION = "jobs"
 

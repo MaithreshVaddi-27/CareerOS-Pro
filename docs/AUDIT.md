@@ -244,6 +244,11 @@ security headers), `core/db.py` (migration/model equality), the checkpointer, an
 why they were not written here. `core/monitoring.py` is pure logic and is the cheapest
 remaining win.
 
+> **Update.** A DB is not actually required to test the routes: setting
+> `DATABASE_URL` to a throwaway SQLite file *before* `backend.main` is imported is
+> enough, which is how the Phase 2 smoke test exercised `POST /jobs/search`. That
+> makes `main.py` the cheapest remaining item, not `core/monitoring.py`.
+
 ---
 
 ### A9 — `skills_required` is always empty · P2
@@ -379,7 +384,7 @@ build.
 | # | Item | Fixes | Effort |
 |---|---|---|---|
 | 7 | Deterministic `skills_required` extraction | A9 | M |
-| 8 | Tests for `core/middleware.py` (rate limit, auth, headers) | A8 | S |
+| 8 | ~~Tests for `core/middleware.py` (rate limit, auth, headers)~~ | A8 | **DONE** |
 | 9 | Tests for the remaining untested routes and graph nodes | A8 | M |
 | 10 | robots.txt compliance in the scraper | A6 | S |
 | 11 | Resume endpoint for the human-review interrupt | A10 | S |

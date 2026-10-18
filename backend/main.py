@@ -19,10 +19,10 @@ from backend.core.middleware import (
 )
 from backend.models import Job
 from backend.schemas import JobOut, MatchedJobOut, MatchRequest, SearchRequest
-from backend.services.dedup import upsert_job
-from backend.services.filters import apply_hard_filters, build_sql_filters
-from backend.services.job_api_adapter import get_adapter
-from backend.services.normalize import normalize_job
+from backend.services.matching.filters import apply_hard_filters, build_sql_filters
+from backend.services.sourcing.dedup import upsert_job
+from backend.services.sourcing.job_api_adapter import get_adapter
+from backend.services.sourcing.normalize import normalize_job
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("careeros")
@@ -38,9 +38,9 @@ async def lifespan(app: FastAPI):
     # a widen-VARCHAR patch) was what let environments drift apart silently.
     yield  # Application runs here
     # Shutdown: close reusable HTTP clients
-    from backend.services.job_api_adapter import _http_client
-    from backend.services.verification import _firecrawl_client
-    from backend.services.verification import _http_client as _verify_client
+    from backend.services.sourcing.job_api_adapter import _http_client
+    from backend.services.sourcing.verification import _firecrawl_client
+    from backend.services.sourcing.verification import _http_client as _verify_client
     for client in (_http_client, _verify_client, _firecrawl_client):
         if client is not None:
             await client.aclose()
@@ -112,7 +112,7 @@ def health():
         health_status["status"] = "degraded"
 
     # Check embedding model availability
-    from backend.services.embeddings import get_embedding_provider
+    from backend.services.matching.embeddings import get_embedding_provider
     try:
         provider = get_embedding_provider()
         _ = provider.embed("test")
@@ -123,7 +123,7 @@ def health():
             health_status["status"] = "degraded"
 
     # Check Qdrant vector store (local mode)
-    from backend.services.vector_store import get_client
+    from backend.services.matching.vector_store import get_client
     try:
         _ = get_client()
         # Just verify client can be created (collection check is separate)
@@ -249,7 +249,7 @@ async def verify_job(job_id: str, db: Session = Depends(get_db)):
 
     from fastapi import HTTPException
 
-    from backend.services.verification import verify_job_posting
+    from backend.services.sourcing.verification import verify_job_posting
 
     job = db.get(Job, job_id)
     if not job:

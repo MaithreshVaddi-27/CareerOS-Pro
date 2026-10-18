@@ -1,6 +1,6 @@
 """Tests for normalization functions."""
 
-from backend.services.normalize import (
+from backend.services.sourcing.normalize import (
     hash_content,
     hash_url,
     normalize_url,

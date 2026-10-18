@@ -2,7 +2,7 @@
 
 from backend.models import Job
 from backend.schemas import SearchRequest
-from backend.services.filters import apply_hard_filters
+from backend.services.matching.filters import apply_hard_filters
 
 
 def make_job(**overrides):

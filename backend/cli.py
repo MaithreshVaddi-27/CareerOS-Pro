@@ -12,7 +12,7 @@ import json
 import re
 from typing import List, Optional
 
-from backend.services.company_scraper import CompanyScraper
+from backend.services.sourcing.company_scraper import CompanyScraper
 
 
 def _extract_salary_number(sal_str: Optional[str]) -> Optional[float]:

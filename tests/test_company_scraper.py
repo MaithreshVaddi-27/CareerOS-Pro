@@ -10,7 +10,7 @@ import asyncio
 import httpx
 import pytest
 
-from backend.services.company_scraper import CompanyScraper
+from backend.services.sourcing.company_scraper import CompanyScraper
 
 # A realistic card shape: labelled company, location, employment type, apply link.
 CAREER_HTML = """
@@ -96,7 +96,7 @@ def test_employment_type_is_raw_and_survives_normalization(scraper):
     """Regression: the scraper used to emit an already-mapped "full_time",
     which normalize.parse_employment_type then failed to look up -> "unknown".
     The scraper must emit the raw token; normalize does the mapping."""
-    from backend.services.normalize import normalize_job
+    from backend.services.sourcing.normalize import normalize_job
 
     cards = CompanyScraper._extract_job_cards(CAREER_HTML)
     raw = CompanyScraper._extract_employment_type(cards[0])
@@ -108,7 +108,7 @@ def test_employment_type_is_raw_and_survives_normalization(scraper):
 
 def test_contract_to_hire_maps_to_contract(scraper):
     """Most specific marker must win over the bare "contract" substring."""
-    from backend.services.normalize import normalize_job
+    from backend.services.sourcing.normalize import normalize_job
 
     html = ('<li class="job-card"><h3>Engineer</h3>'
             '<p>Contract-to-hire, six month engagement with Python work.</p></li>')

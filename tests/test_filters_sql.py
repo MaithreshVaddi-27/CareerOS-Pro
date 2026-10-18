@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from backend.core.db import Base
 from backend.models import Job
 from backend.schemas import SearchRequest
-from backend.services.filters import apply_hard_filters, build_sql_filters
+from backend.services.matching.filters import apply_hard_filters, build_sql_filters
 
 NOW = dt.datetime(2026, 10, 17, 12, 0, tzinfo=dt.timezone.utc)
 

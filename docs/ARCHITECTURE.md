@@ -49,17 +49,46 @@ plain unit tests.
 backend/
 ├── core/                    cross-cutting; no job knowledge
 │   ├── config.py            Settings (pydantic-settings, lru_cache), single source of truth
-│   ├── db.py                engine, SessionLocal, Base, startup schema reconcile
+│   ├── db.py                engine, SessionLocal, Base (schema comes from Alembic)
 │   ├── middleware.py        request-id, security headers, rate limit, API-key gate
 │   └── monitoring.py        AgentMonitor: per-agent latency/failure stats
 ├── models/job.py            SQLAlchemy ORM — one table: jobs
 ├── schemas/job.py           Pydantic contracts (Raw/Normalized/Out/Request)
-├── services/                all business logic, one concern per module
+├── services/                all business logic
+│   ├── sourcing/            talks to the outside world about jobs
+│   │   ├── job_api_adapter.py  source adapters + fan-out
+│   │   ├── company_scraper.py  career-page scraping
+│   │   ├── normalize.py        deterministic parsing
+│   │   ├── dedup.py            upsert by hash
+│   │   └── verification.py     liveness check
+│   └── matching/            turns rows we hold into a ranked, explained answer
+│       ├── filters.py          hard filters (SQL prefilter + authoritative Python pass)
+│       ├── reranker.py         hybrid scoring
+│       ├── model_router.py     LLM providers + grounded prompting
+│       ├── embeddings.py       embedding providers
+│       └── vector_store.py     Qdrant + fallback
 ├── graph.py                 LangGraph state machine
 ├── main.py                  FastAPI app, routes, lifespan
 ├── cli.py                   scrape one company → JSON on stdout
+├── retention.py             bounded pruning of inactive jobs
 └── run.py                   entrypoint (loads .env, fixes sys.path, starts uvicorn)
 ```
+
+### The `services/` split
+
+`sourcing` and `matching` are separated by a single question: **does this module talk
+to an external system to learn about a job, or does it reason about rows we already
+hold?**
+
+- **sourcing** — everything that goes out to the network about jobs, plus parsing,
+  dedup, and the liveness check (which also goes out to the network, to ask whether a
+  posting we hold is still there).
+- **matching** — filtering, semantic recall, scoring, and the grounded explanation.
+
+Nothing in `matching` may fetch a job. That boundary is load-bearing: the graph runs
+`discover → normalize → dedup → filter` on every request, and if matching could reach
+the network it would re-acquire the same postings per request instead of reading what
+dedup already stored.
 
 ### Dependency direction
 
@@ -67,15 +96,22 @@ backend/
 main.py ─┐
 graph.py ─┼─→ services/* ─┐
 cli.py  ───┘               ├─→ core/config.py  (leaf)
-                           └─→ schemas/job.py (leaf)
+retention.py               └─→ schemas/job.py (leaf)
 core/*  ─────────────────────→ core/config.py
 models/job.py ───────────────→ core/db.py (Base)
+
+services/sourcing/* → services/sourcing/* only  (adapter → scraper)
+services/matching/* → services/matching/* only  (vector_store → embeddings)
 ```
+
+The two `services/` subpackages do not import each other at all. They meet only in
+`graph.py`, which orchestrates them in sequence.
 
 Rules that hold everywhere:
 
 - `core/*` never imports from `services/*`.
-- `services/*` never imports `main`, `graph`, or `cli`.
+- `services/*` never imports `main`, `graph`, `cli`, or `retention`.
+- `services/matching/*` never imports `services/sourcing/*`, and vice versa.
 - `schemas/` and `models/` are leaves — they import only from `core/`.
 - Nothing imports from `tests/`.
 

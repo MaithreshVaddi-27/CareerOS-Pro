@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from backend.services.verification import (
+from backend.services.sourcing.verification import (
     _firecrawl_scrape,
     _http_head_check,
     _looks_like_dead_posting,
@@ -32,7 +32,7 @@ def test_looks_like_dead_posting():
 @pytest.mark.asyncio
 async def test_http_head_check_success():
     """Test successful HTTP HEAD check."""
-    with patch('backend.services.verification.get_http_client') as mock_get_client:
+    with patch('backend.services.sourcing.verification.get_http_client') as mock_get_client:
         mock_client = AsyncMock()
         mock_get_client.return_value = mock_client
 
@@ -49,7 +49,7 @@ async def test_http_head_check_success():
 @pytest.mark.asyncio
 async def test_http_head_check_405_fallback():
     """Test HEAD 405 falls back to GET."""
-    with patch('backend.services.verification.get_http_client') as mock_get_client:
+    with patch('backend.services.sourcing.verification.get_http_client') as mock_get_client:
         mock_client = AsyncMock()
         mock_get_client.return_value = mock_client
 
@@ -71,7 +71,7 @@ async def test_http_head_check_405_fallback():
 @pytest.mark.asyncio
 async def test_http_head_check_403_fallback():
     """Test HEAD 403 falls back to GET with User-Agent."""
-    with patch('backend.services.verification.get_http_client') as mock_get_client:
+    with patch('backend.services.sourcing.verification.get_http_client') as mock_get_client:
         mock_client = AsyncMock()
         mock_get_client.return_value = mock_client
 
@@ -96,7 +96,7 @@ async def test_http_head_check_403_fallback():
 @pytest.mark.asyncio
 async def test_http_head_check_failure():
     """Test HTTP HEAD check failure returns False."""
-    with patch('backend.services.verification.get_http_client') as mock_get_client:
+    with patch('backend.services.sourcing.verification.get_http_client') as mock_get_client:
         mock_client = AsyncMock()
         mock_get_client.return_value = mock_client
 
@@ -110,7 +110,7 @@ async def test_http_head_check_failure():
 @pytest.mark.asyncio
 async def test_firecrawl_scrape_no_api_key():
     """Test Firecrawl scrape returns None when no API key."""
-    with patch('backend.services.verification.settings') as mock_settings:
+    with patch('backend.services.sourcing.verification.settings') as mock_settings:
         mock_settings.firecrawl_api_key = ""
 
         result = await _firecrawl_scrape("https://example.com/job")
@@ -120,7 +120,7 @@ async def test_firecrawl_scrape_no_api_key():
 @pytest.mark.asyncio
 async def test_verify_job_posting_unreachable():
     """Test verification fails when URL is unreachable."""
-    with patch('backend.services.verification._http_head_check') as mock_head_check:
+    with patch('backend.services.sourcing.verification._http_head_check') as mock_head_check:
         mock_head_check.return_value = False
 
         result = await verify_job_posting(
@@ -136,8 +136,8 @@ async def test_verify_job_posting_unreachable():
 @pytest.mark.asyncio
 async def test_verify_job_posting_no_firecrawl_key():
     """Test verification when reachable but no Firecrawl key."""
-    with patch('backend.services.verification._http_head_check') as mock_head_check, \
-         patch('backend.services.verification.settings') as mock_settings:
+    with patch('backend.services.sourcing.verification._http_head_check') as mock_head_check, \
+         patch('backend.services.sourcing.verification.settings') as mock_settings:
 
         mock_head_check.return_value = True
         mock_settings.firecrawl_api_key = ""

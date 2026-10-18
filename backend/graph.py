@@ -22,13 +22,13 @@ from sqlalchemy.orm import Session
 from backend.core.config import get_settings
 from backend.models import Job
 from backend.schemas import MatchRequest, SearchRequest
-from backend.services.dedup import upsert_job
-from backend.services.filters import apply_hard_filters, build_sql_filters
-from backend.services.job_api_adapter import get_adapter
-from backend.services.model_router import get_model_router_for_request
-from backend.services.normalize import normalize_job
-from backend.services.reranker import ScoredJob, keyword_score, rerank
-from backend.services.vector_store import get_client, index_job, semantic_search
+from backend.services.matching.filters import apply_hard_filters, build_sql_filters
+from backend.services.matching.model_router import get_model_router_for_request
+from backend.services.matching.reranker import ScoredJob, keyword_score, rerank
+from backend.services.matching.vector_store import get_client, index_job, semantic_search
+from backend.services.sourcing.dedup import upsert_job
+from backend.services.sourcing.job_api_adapter import get_adapter
+from backend.services.sourcing.normalize import normalize_job
 
 settings = get_settings()
 _checkpointer_singleton: dict = {}

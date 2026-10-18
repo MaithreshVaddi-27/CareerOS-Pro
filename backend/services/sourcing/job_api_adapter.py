@@ -18,7 +18,7 @@ import httpx
 from backend.core.config import get_settings
 from backend.core.monitoring import agent_monitor
 from backend.schemas import RawJobPosting
-from backend.services.company_scraper import scrape_company_jobs
+from backend.services.sourcing.company_scraper import scrape_company_jobs
 
 logger = logging.getLogger("careeros")
 settings = get_settings()

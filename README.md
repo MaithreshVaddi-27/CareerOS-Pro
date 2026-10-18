@@ -321,17 +321,19 @@ backend/
 │   └── monitoring.py  AgentMonitor — per-agent latency/failure stats
 ├── models/          SQLAlchemy ORM (Job)
 ├── schemas/         Pydantic request/response contracts
-├── services/        business logic — all of it here, one concern per file
-│   ├── company_scraper.py  career-page scraping
-│   ├── job_api_adapter.py  source adapters + fan-out
-│   ├── normalize.py        deterministic parsing
-│   ├── dedup.py            upsert by hash
-│   ├── filters.py          hard filters (SQL prefilter + authoritative Python pass)
-│   ├── vector_store.py     Qdrant + fallback
-│   ├── reranker.py         hybrid scoring
-│   ├── model_router.py     LLM providers + grounded prompting
-│   ├── embeddings.py       embedding providers
-│   └── verification.py     liveness check
+├── services/        business logic — all of it here
+│   ├── sourcing/    everything that brings job data in from outside
+│   │   ├── job_api_adapter.py  source adapters + fan-out
+│   │   ├── company_scraper.py  career-page scraping
+│   │   ├── normalize.py        deterministic parsing
+│   │   ├── dedup.py            upsert by hash
+│   │   └── verification.py     liveness check
+│   └── matching/    everything that turns rows into a ranked answer
+│       ├── filters.py          hard filters (SQL prefilter + authoritative Python pass)
+│       ├── reranker.py         hybrid scoring
+│       ├── model_router.py     LLM providers + grounded prompting
+│       ├── embeddings.py       embedding providers
+│       └── vector_store.py     Qdrant + fallback
 ├── graph.py         LangGraph orchestration (no business logic)
 ├── main.py          FastAPI app + routes
 ├── cli.py           scrape a single company to JSON
@@ -343,6 +345,13 @@ backend/
 no business logic. `graph.py` in particular is pure orchestration — every node just
 calls a service function. If you find yourself writing a `if` about job data in
 `graph.py`, it belongs in `services/`.
+
+**The `services/` split is the second rule: `sourcing` versus `matching`.** If the
+module talks to an external system to learn about jobs — or judges whether a posting
+we already hold is still live — it is `sourcing`. If it turns rows we already have
+into a ranked, explained answer, it is `matching`. Nothing in `matching` may fetch a
+job; that boundary is what stops the graph re-acquiring the same posting on every
+request. The two `__init__.py` files state the rule in full.
 
 See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the data flow, the
 extension points, and the design decisions behind the layout.
@@ -380,7 +389,7 @@ llama.cpp (local, private) → NVIDIA NIM → OpenRouter → Gemini
 You can pin a single provider per request with `llm_provider`, or globally with
 `LLM_PROVIDER_MODE`.
 
-**The prompt.** `backend/services/model_router.py` builds one prompt per job, reused
+**The prompt.** `backend/services/matching/model_router.py` builds one prompt per job, reused
 across every provider attempt so routing cannot change what is being asked:
 
 - **CRAFT structure** — Role / Context / Action / Format / Tone. The Role and the

@@ -5,7 +5,7 @@ import pytest
 
 from backend.core.config import get_settings
 from backend.schemas import RawJobPosting
-from backend.services.job_api_adapter import (
+from backend.services.sourcing.job_api_adapter import (
     JSearchAdapter,
     MockJobAdapter,
     MultiSourceAdapter,

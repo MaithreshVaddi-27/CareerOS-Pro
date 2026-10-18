@@ -8,7 +8,7 @@ subset/grounding rules that keep output auditable.
 import asyncio
 import time
 
-from backend.services.model_router import (
+from backend.services.matching.model_router import (
     _MAX_JD_CHARS,
     MatchExplanation,
     _build_match_prompt,

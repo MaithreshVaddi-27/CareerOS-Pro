@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from backend.models import Job
 from backend.schemas import RawJobPosting
-from backend.services.dedup import upsert_job
+from backend.services.sourcing.dedup import upsert_job
 
 
 def test_upsert_job_deduplication():
@@ -19,7 +19,7 @@ def test_upsert_job_deduplication():
     mock_existing_job = Mock(spec=Job)
     mock_existing_job.source_id = "job-001"
 
-    with patch('backend.services.dedup.find_duplicate') as mock_find_duplicate:
+    with patch('backend.services.sourcing.dedup.find_duplicate') as mock_find_duplicate:
         mock_find_duplicate.side_effect = [None, mock_existing_job]
 
         job1 = RawJobPosting(
@@ -49,7 +49,7 @@ def test_upsert_job_deduplication():
         )
 
         # Convert to normalized job for dedup functions
-        from backend.services.normalize import normalize_job
+        from backend.services.sourcing.normalize import normalize_job
         normalized_job1 = normalize_job(job1)
         normalized_job2 = normalize_job(job2)
 
@@ -71,7 +71,7 @@ def test_upsert_job_no_duplicate():
     mock_db = Mock(spec=Session)
 
     # Mock find_duplicate to return None (no duplicates found)
-    with patch('backend.services.dedup.find_duplicate') as mock_find_duplicate:
+    with patch('backend.services.sourcing.dedup.find_duplicate') as mock_find_duplicate:
         mock_find_duplicate.return_value = None
 
         job1 = RawJobPosting(
@@ -101,7 +101,7 @@ def test_upsert_job_no_duplicate():
         )
 
         # Convert to normalized job for dedup functions
-        from backend.services.normalize import normalize_job
+        from backend.services.sourcing.normalize import normalize_job
         normalized_job1 = normalize_job(job1)
         normalized_job2 = normalize_job(job2)
 

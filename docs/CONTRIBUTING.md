@@ -43,17 +43,29 @@ commit.
 each node delegates to a service. If you are writing an `if` about job data in either
 file, it belongs in `services/`.
 
+`services/` splits in two, and the split is load-bearing:
+
+- **`sourcing/`** — talks to the outside world about jobs: source adapters, the
+  career-page scraper, parsing, dedup, and the liveness check.
+- **`matching/`** — turns rows we already hold into a ranked, explained answer:
+  filters, reranking, embeddings, vector store, LLM routing.
+
+Nothing in `matching/` may fetch a job, and the two never import each other. Both
+rules are enforced by `tests/test_boundaries.py` — if you break one, the suite tells
+you rather than a reviewer six weeks from now.
+
 Dependency direction is strict:
 
 ```
 main.py ─┐
 graph.py ─┼─→ services/* ─┐
 cli.py  ───┘              ├─→ core/config.py  (leaf)
-                          └─→ schemas/job.py  (leaf)
+retention.py               └─→ schemas/job.py  (leaf)
 ```
 
 - `core/*` never imports `services/*`.
-- `services/*` never imports `main`, `graph` or `cli`.
+- `services/*` never imports `main`, `graph`, `cli` or `retention`.
+- `services/matching/*` and `services/sourcing/*` never import each other.
 - Nothing imports from `tests/`.
 
 ## Conventions
@@ -100,12 +112,16 @@ beyond `conftest.py`.
 | `test_company_scraper.py` | Card extraction, field extraction, URL discovery, cache, retry |
 | `test_dedup.py` | `upsert_job` deduplication |
 | `test_filters.py` | Each hard filter in isolation and combined |
+| `test_filters_sql.py` | SQL prefilter is a superset of the Python predicate |
 | `test_job_adapter.py` | Adapter selection, mock/live mode, fan-out |
 | `test_match_prompt.py` | Prompt invariants and explain-node concurrency |
 | `test_middleware.py` | Rate limiting (both backends), API-key auth, response headers |
 | `test_migrations.py` | Migrations match the models; `.env.example` matches `Settings` |
 | `test_checkpoint.py` | Checkpointer selection, degradation, `CHECKPOINT_STRICT` |
 | `test_verification.py` | Liveness checking |
+| `test_retention.py` | Dry-run default, bounded batches, never touches active rows |
+| `test_pagination.py` | `limit`/`offset`/`top_k` bounds |
+| `test_boundaries.py` | Import layering: core/services split, sourcing/matching independence |
 
 ### Conventions
 
