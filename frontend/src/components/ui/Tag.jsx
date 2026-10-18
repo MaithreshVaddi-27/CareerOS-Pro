@@ -2,13 +2,16 @@
  * Tag / chip — small categorical label.
  * Color mapped to category for type-safe styling (§16 grouping/mapping).
  */
+// Hues only. purple/pink were dropped when the accent moved to emerald — a tag
+// palette with violet in it re-introduces exactly the tint the rest of the UI
+// dropped. 'teal' is kept as the key name because JobCard uses it for job.source,
+// but it now paints cyan.
 const CLASSES = {
-  blue: 'tag-blue',
+  blue: 'tag-blue',      // emerald — the brand hue
   green: 'tag-green',
   orange: 'tag-orange',
-  purple: 'tag-purple',
-  pink: 'tag-pink',
-  teal: 'tag-teal',
+  teal: 'tag-teal',      // cyan
+  sky: 'tag-sky',
   red: 'tag-red',
   yellow: 'tag-yellow',
   neutral: 'tag',

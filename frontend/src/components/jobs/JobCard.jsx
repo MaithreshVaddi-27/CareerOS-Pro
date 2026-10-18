@@ -144,7 +144,7 @@ export default function JobCard({ job, onOpen, onSave, saved = false }) {
 
             {/* Tag row */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
-              <Tag color={isIntern ? 'purple' : 'blue'} dot>
+              <Tag color={isIntern ? 'sky' : 'blue'} dot>
                 {isIntern ? 'Internship' : job.employment_type || 'Full-time'}
               </Tag>
               {job.experience_level && <Tag>{formatLabel(job.experience_level)}</Tag>}
@@ -166,7 +166,7 @@ export default function JobCard({ job, onOpen, onSave, saved = false }) {
                 onClick={(e) => { e.stopPropagation(); setCardSaved(!cardSaved); onSave?.(job); }}
                 style={{
                   fontSize: '1.25rem', lineHeight: 1, cursor: 'pointer',
-                  color: cardSaved ? 'var(--color-pink)' : 'var(--color-text-faint)',
+                  color: cardSaved ? 'var(--accent-2)' : 'var(--color-text-faint)',
                 }}
                 role="button"
                 tabIndex={0}

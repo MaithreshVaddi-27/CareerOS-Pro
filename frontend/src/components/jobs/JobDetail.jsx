@@ -26,7 +26,7 @@ export default function JobDetail({ job, onClose, onVerify, verifying }) {
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-5)' }}>
-        <Tag color={isIntern ? 'purple' : 'blue'} dot>
+        <Tag color={isIntern ? 'sky' : 'blue'} dot>
           {isIntern ? 'Internship' : job.employment_type || 'Full-time'}
         </Tag>
         {job.experience_level ? <Tag>{formatLabel(job.experience_level)}</Tag> : null}

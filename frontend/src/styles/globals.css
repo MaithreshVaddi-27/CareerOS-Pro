@@ -1,64 +1,64 @@
 /* ============================================================
-   CareerOS — Premium dark design tokens
-   Deep near-black surfaces, indigo accent scale, functional hues
-   used sparingly, rounded-radius system, and dark-mode-first rules.
+   CareerOS — dark design tokens
+   Near-black surfaces, a single emerald accent, functional hues used
+   sparingly. No purple/pink/violet anywhere: the previous indigo->violet
+   ramp read as generic-AI-startup and fought the warm neutrals below.
+   Dark-first by design, not by media query.
    ============================================================ */
 
 :root {
   color-scheme: dark;
 
-  /* Surfaces */
-  --bg-deep: #03030a;
-  --bg-card: #0b0b14;
-  --bg-card-hover: #10101f;
-  --surface-base: #0b0b14;
-  --surface-elevated: #10101f;
-  --surface-glass: rgba(11, 11, 20, 0.72);
+  /* Surfaces — warm-tinted near-black, so the emerald has something to sit on */
+  --bg-deep: #07090a;
+  --bg-card: #0e1211;
+  --bg-card-hover: #141a18;
+  --surface-base: #0e1211;
+  --surface-elevated: #141a18;
+  --surface-glass: rgba(14, 18, 17, 0.72);
 
   /* Structure */
-  --border: rgba(255, 255, 255, 0.06);
-  --border-soft: rgba(255, 255, 255, 0.12);
-  --border-hover: rgba(255, 255, 255, 0.18);
+  --border: rgba(255, 255, 255, 0.07);
+  --border-soft: rgba(255, 255, 255, 0.13);
+  --border-hover: rgba(255, 255, 255, 0.20);
 
-  /* Text hierarchy */
-  --text: #dddde8;
-  --text-secondary: #a3a3c2;
-  --text-tertiary: #8888b0;
-  --text-faint: #55557a;
-  --text-on-accent: #ffffff;
+  /* Text hierarchy — neutral greys, slightly warm, never tinted */
+  --text: #e8edea;
+  --text-secondary: #a3b0aa;
+  --text-tertiary: #7c8a84;
+  --text-faint: #55615c;
+  --text-on-accent: #04120b;
 
-  /* Accent scale: indigo -> violet */
-  --accent-1: #6366f1;
-  --accent-2: #8b5cf6;
-  --accent-3: #06b6d4;
-  --accent-4: #ec4899;
-  --accent-5: #f59e0b;
+  /* Accent — emerald. One hue, several steps; no second brand colour. */
+  --accent-1: #10b981;
+  --accent-2: #34d399;
+  --accent-3: #2dd4bf;
+  --accent-4: #f59e0b;
+  --accent-5: #38bdf8;
   --accent: var(--accent-1);
-  --accent-hover: var(--accent-1);
-  --accent-press: #4f52d6;
-  --accent-soft: rgba(99, 102, 241, 0.14);
-  --accent-faint: rgba(99, 102, 241, 0.05);
-  --accent-glow: rgba(99, 102, 241, 0.35);
+  --accent-hover: #0ea371;
+  --accent-press: #0b7d56;
+  --accent-soft: rgba(16, 185, 129, 0.16);
+  --accent-faint: rgba(16, 185, 129, 0.06);
+  --accent-glow: rgba(16, 185, 129, 0.38);
 
   /* Functional (use sparingly) */
-  --green: #28b846;
+  --green: #22c55e;
   --green-soft: rgba(34, 197, 94, 0.14);
   --orange: #f59e0b;
   --orange-soft: rgba(245, 158, 11, 0.14);
-  --purple: #8b5cf6;
-  --purple-soft: rgba(139, 92, 246, 0.14);
-  --pink: #ec4899;
-  --pink-soft: rgba(236, 72, 153, 0.14);
-  --red: #e63b3b;
-  --red-soft: rgba(230, 59, 59, 0.14);
-  --teal: #06b6d4;
-  --teal-soft: rgba(6, 182, 212, 0.14);
-  --yellow: #f5c21a;
-  --yellow-soft: rgba(245, 194, 26, 0.14);
+  --cyan: #22d3ee;
+  --cyan-soft: rgba(34, 211, 238, 0.14);
+  --sky: #38bdf8;
+  --sky-soft: rgba(56, 189, 248, 0.14);
+  --red: #ef4444;
+  --red-soft: rgba(239, 68, 68, 0.14);
+  --yellow: #facc15;
+  --yellow-soft: rgba(250, 204, 21, 0.14);
 
   /* Depth */
-  --scrim: rgba(3, 3, 10, 0.60);
-  --scrim-heavy: rgba(3, 3, 10, 0.82);
+  --scrim: rgba(4, 6, 5, 0.62);
+  --scrim-heavy: rgba(4, 6, 5, 0.84);
 
   /* Radius scale */
   --r-1: 10px;
@@ -73,7 +73,7 @@
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 22px 64px rgba(0, 0, 0, 0.55);
-  --shadow-glow: 0 0 0 1px rgba(99, 102, 241, 0.35), 0 12px 40px rgba(99, 102, 241, 0.18);
+  --shadow-glow: 0 0 0 1px rgba(16, 185, 129, 0.35), 0 12px 40px rgba(16, 185, 129, 0.20);
 
   /* Spacing */
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
@@ -82,6 +82,14 @@
   /* Type */
   --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
   --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
+
+  /* Motion — easings + durations, so timing is tokenised like colour */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-press: 100ms;
+  --dur-hover: 220ms;
+  --dur-reveal: 520ms;
 
   /* Backward-compat aliases for existing component classes */
   --color-accent: var(--accent);
@@ -104,10 +112,9 @@
   --color-scrim: var(--scrim);
   --color-green: var(--green); --color-green-soft: var(--green-soft);
   --color-orange: var(--orange); --color-orange-soft: var(--orange-soft);
-  --color-purple: var(--purple); --color-purple-soft: var(--purple-soft);
-  --color-pink: var(--pink); --color-pink-soft: var(--pink-soft);
+  --color-cyan: var(--cyan); --color-cyan-soft: var(--cyan-soft);
+  --color-sky: var(--sky); --color-sky-soft: var(--sky-soft);
   --color-red: var(--red); --color-red-soft: var(--red-soft);
-  --color-teal: var(--teal); --color-teal-soft: var(--teal-soft);
   --color-yellow: var(--yellow); --color-yellow-soft: var(--yellow-soft);
   --radius-sm: var(--r-1);
   --radius-md: var(--r-2);
@@ -116,41 +123,10 @@
   --radius-2xl: var(--r-5);
 }
 
-/* ---------- Optional light mode ---------- */
-@media (prefers-color-scheme: light) {
-  :root {
-    color-scheme: light;
-    --bg-deep: #f4f3ee;
-    --bg-card: #ffffff;
-    --bg-card-hover: #f7f7fa;
-    --surface-base: #ffffff;
-    --surface-elevated: #ffffff;
-    --surface-glass: rgba(255, 255, 255, 0.78);
-    --border: rgba(0, 0, 0, 0.07);
-    --border-soft: rgba(0, 0, 0, 0.11);
-    --border-hover: rgba(0, 0, 0, 0.16);
-    --text: #0f0e0b;
-    --text-secondary: #5a5852;
-    --text-tertiary: #777770;
-    --text-faint: #9a9a90;
-    --text-on-accent: #ffffff;
-    --accent-soft: rgba(99, 102, 241, 0.12);
-    --accent-faint: rgba(99, 102, 241, 0.04);
-    --accent-glow: rgba(99, 102, 241, 0.25);
-    --green-soft: rgba(34, 197, 94, 0.10);
-    --orange-soft: rgba(245, 158, 11, 0.10);
-    --purple-soft: rgba(139, 92, 246, 0.10);
-    --pink-soft: rgba(236, 72, 153, 0.10);
-    --red-soft: rgba(230, 59, 59, 0.09);
-    --teal-soft: rgba(6, 182, 212, 0.10);
-    --yellow-soft: rgba(245, 194, 26, 0.12);
-    --scrim: rgba(0, 0, 0, 0.30);
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04);
-    --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.06);
-    --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.08);
-    --shadow-glow: 0 0 0 1px rgba(99, 102, 241, 0.22), 0 8px 28px rgba(99, 102, 241, 0.12);
-  }
-}
+/* Light mode is deliberately not offered. The previous block was a light theme
+   nobody had looked at — it paired the warm greys above with a violet accent and
+   a pink body glow, which is not a palette anyone chose. Adding one later means
+   designing it, not re-tinting these tokens. */
 
 /* ---------- Reset ---------- */
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -167,10 +143,12 @@ body {
   color: var(--text);
   background: var(--bg-deep);
   background-attachment: fixed;
+  /* One cool emerald wash top-left, one warm amber counterweight bottom-right.
+     Two light sources, opposed, so the page has a direction instead of a
+     uniform tint. */
   background-image:
-    radial-gradient(ellipse 90% 60% at 15% 10%, rgba(99, 102, 241, 0.10), transparent 55%),
-    radial-gradient(ellipse 70% 50% at 85% 75%, rgba(236, 72, 153, 0.08), transparent 55%),
-    radial-gradient(ellipse 50% 40% at 50% 50%, rgba(6, 182, 212, 0.06), transparent 60%);
+    radial-gradient(ellipse 90% 60% at 12% 8%, rgba(16, 185, 129, 0.10), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 88% 78%, rgba(245, 158, 11, 0.06), transparent 55%);
 }
 img, svg { display: block; }
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
@@ -217,7 +195,7 @@ a { color: inherit; text-decoration: none; }
   background: var(--surface-glass);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-md);
-  transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease, background 220ms ease;
+  transition: transform var(--dur-hover) var(--ease-out), box-shadow var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), background var(--dur-hover) var(--ease-out);
 }
 .glass-card:hover {
   border-color: var(--border-hover);
@@ -247,7 +225,7 @@ a { color: inherit; text-decoration: none; }
   position: relative;
   overflow: hidden;
   will-change: transform;
-  transition: transform 150ms ease, box-shadow 150ms ease, background 150ms ease;
+  transition: transform var(--dur-press) var(--ease-out), box-shadow var(--dur-hover) var(--ease-out), background var(--dur-hover) var(--ease-out);
 }
 .btn::after {
   content: '';
@@ -255,7 +233,7 @@ a { color: inherit; text-decoration: none; }
   inset: 0;
   background: linear-gradient(180deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 100%);
   opacity: 0;
-  transition: opacity 180ms ease;
+  transition: opacity var(--dur-hover) var(--ease-out);
 }
 .btn:hover::after { opacity: 1; }
 
@@ -266,10 +244,10 @@ a { color: inherit; text-decoration: none; }
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
-  color: #fff;
+  background: linear-gradient(135deg, var(--accent-1), var(--accent-3));
+  color: var(--text-on-accent);
   padding: 11px 22px; font-size: 1rem;
-  box-shadow: 0 10px 28px rgba(99, 102, 241, 0.30);
+  box-shadow: 0 10px 28px rgba(16, 185, 129, 0.30);
   position: relative;
   overflow: hidden;
 }
@@ -281,10 +259,10 @@ a { color: inherit; text-decoration: none; }
   width: 100%;
   height: 100%;
   background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
-  transition: left 0.5s ease;
+  transition: left 520ms var(--ease-out);
 }
 .btn-primary:hover::before { left: 100%; }
-.btn-primary:hover { box-shadow: 0 14px 36px rgba(99, 102, 241, 0.45); }
+.btn-primary:hover { box-shadow: 0 14px 36px rgba(16, 185, 129, 0.45); }
 .btn-primary:active { transform: scale(0.97); filter: brightness(0.92); }
 
 .btn-secondary {
@@ -292,7 +270,7 @@ a { color: inherit; text-decoration: none; }
   color: var(--text);
   border: 1px solid var(--border-soft);
   padding: 11px 22px; font-size: 1rem;
-  transition: background 150ms ease, border-color 150ms ease;
+  transition: background var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out);
 }
 .btn-secondary:hover { background: var(--bg-card-hover); border-color: var(--border-hover); box-shadow: var(--shadow-sm); }
 .btn-secondary:active { transform: scale(0.97); }
@@ -301,7 +279,7 @@ a { color: inherit; text-decoration: none; }
   background: transparent;
   color: var(--text-secondary);
   padding: 11px 18px; font-size: 0.9375rem;
-  transition: color 150ms ease, background 150ms ease;
+  transition: color var(--dur-hover) var(--ease-out), background var(--dur-hover) var(--ease-out);
 }
 .btn-ghost:hover { color: #fff; background: var(--accent-faint); box-shadow: var(--shadow-sm) inset; }
 
@@ -311,22 +289,22 @@ a { color: inherit; text-decoration: none; }
 /* Search button — primary CTA */
 .btn-search {
   --accent: var(--accent-3);
-  --accent-soft: rgba(6, 182, 212, 0.25);
-  --accent-faint: rgba(6, 182, 212, 0.08);
+  --accent-soft: rgba(45, 212, 191, 0.25);
+  --accent-faint: rgba(45, 212, 191, 0.08);
 }
 .btn-search.lg {
-  background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
-  color: #fff;
+  background: linear-gradient(135deg, var(--accent-3), var(--accent-1));
+  color: var(--text-on-accent);
   padding: 11px 22px; font-size: 1rem;
-  box-shadow: 0 10px 28px rgba(6, 182, 212, 0.30);
+  box-shadow: 0 10px 28px rgba(45, 212, 191, 0.30);
   border-radius: var(--r-full);
   position: relative;
   overflow: hv;
-  transition: transform 150ms ease, box-shadow 150ms ease;
+  transition: transform var(--dur-press) var(--ease-out), box-shadow var(--dur-hover) var(--ease-out);
 }
 .btn-search.lg:hover {
   transform: translateY(-2px);
-  box-shadow: 0 14px 40px rgba(6, 182, 212, 0.45);
+  box-shadow: 0 14px 40px rgba(45, 212, 191, 0.45);
 }
 .btn-search.lg:active {
   transform: scale(0.96);
@@ -352,7 +330,7 @@ a { color: inherit; text-decoration: none; }
   color: var(--text);
   padding: 12px 16px;
   font-size: 1rem;
-  transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+  transition: border-color var(--dur-hover) var(--ease-out), box-shadow var(--dur-hover) var(--ease-out), background var(--dur-hover) var(--ease-out);
   outline: none;
 }
 .input::placeholder { color: var(--text-faint); }
@@ -364,7 +342,7 @@ a { color: inherit; text-decoration: none; }
 
 .select {
   appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238888b0' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%237c8a84' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
   background-repeat: no-repeat;
   background-position: right 14px center;
   padding-right: 38px;
@@ -383,21 +361,21 @@ a { color: inherit; text-decoration: none; }
   letter-spacing: 0;
   border: 1px solid transparent;
   white-space: nowrap;
-  transition: background 150ms ease, border-color 150ms ease, transform 100ms ease, box-shadow 150ms ease;
+  transition: background var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out), transform var(--dur-press) var(--ease-out), box-shadow var(--dur-hover) var(--ease-out);
 }
 .tag:hover {
   transform: translateY(-1px);
   box-shadow: var(--shadow-sm);
 }
-.tag-blue:hover    { background: rgba(99, 102, 241, 0.20); border-color: rgba(99, 102, 241, 0.48); }
-.tag-green:hover   { background: rgba(34, 197, 94, 0.20); border-color: rgba(34, 197, 94, 0.48); color: #a0f0c7; }
+.tag:active { transform: scale(0.96); }
+.tag-blue:hover    { background: rgba(16, 185, 129, 0.20); border-color: rgba(16, 185, 129, 0.48); }
+.tag-green:hover   { background: rgba(34, 197, 94, 0.20); border-color: rgba(34, 197, 94, 0.48); color: #a7f3c8; }
 .tag-orange:hover  { background: rgba(245, 158, 11, 0.20); border-color: rgba(245, 158, 11, 0.48); color: #ffecb3; }
-.tag-purple:hover  { background: rgba(139, 92, 246, 0.20); border-color: rgba(139, 92, 246, 0.48); color: #e0cfee; }
-.tag-pink:hover    { background: rgba(236, 72, 153, 0.20); border-color: rgba(236, 72, 153, 0.48); color: #f7c1e8; }
-.tag-teal:hover    { background: rgba(6, 182, 212, 0.20); border-color: rgba(6, 182, 212, 0.48); color: #7df0ff; }
-.tag-red:hover     { background: rgba(230, 59, 59, 0.20); border-color: rgba(230, 59, 59, 0.48); color: #ffc8c8; }
+.tag-teal:hover    { background: rgba(34, 211, 238, 0.20); border-color: rgba(34, 211, 238, 0.48); color: #a5f3fc; }
+.tag-sky:hover    { background: rgba(56, 189, 248, 0.20); border-color: rgba(56, 189, 248, 0.48); color: #bae6fd; }
+.tag-red:hover     { background: rgba(239, 68, 68, 0.20); border-color: rgba(239, 68, 68, 0.48); color: #fecaca; }
 .tag-yellow:hover  { background: rgba(245, 194, 26, 0.20); border-color: rgba(245, 194, 26, 0.48); color: #fff; }
-.tag-neutral:hover { background: rgba(250,250,255,0.08); border-color: var(--border); }
+.tag-neutral:hover { background: rgba(255,255,255,0.07); border-color: var(--border); }
 
 /* ---------- Skeleton ---------- */
 @keyframes shimmer {
@@ -405,11 +383,31 @@ a { color: inherit; text-decoration: none; }
   100% { background-position: -200% 0; }
 }
 
-/* ---------- Skeleton ---------- */
-@keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+/* ---------- Motion ----------
+   Easings from the Apple spring vocabulary. cubic-bezier(0.32, 0.72, 0, 1)
+   reads as "settles" rather than "eases" — fast departure, long glide, no
+   bounce. Bounce is reserved for momentum-driven gestures and is handled by
+   framer-motion's springs, not here. */
+
+/* Materialize, don't just fade: blur and scale arrive together so a glass
+   surface reads as a physical material landing, not an opacity ramp. */
+@keyframes materialize {
+  from { opacity: 0; backdrop-filter: saturate(160%) blur(0px); -webkit-backdrop-filter: saturate(160%) blur(0px); transform: scale(0.985); }
+  to   { opacity: 1; transform: scale(1); }
 }
+.materialize { animation: materialize var(--dur-reveal) var(--ease-spring) both; }
+
+/* Scroll-edge fade where content passes under floating chrome. A hard 1px rule
+   under a translucent bar reads as a seam; this reads as the bar sitting on top. */
+.scroll-edge {
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 18px);
+  mask-image: linear-gradient(180deg, transparent 0, #000 18px);
+}
+
+/* Press feedback on pointer-down, not on release — the highlight must be there
+   before the finger lifts or the control feels dead. */
+.pressable { transition: transform var(--dur-press) var(--ease-out), box-shadow var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out); }
+.pressable:active { transform: scale(0.975); }
 
 /* ---------- Scrollbar ---------- */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -421,10 +419,44 @@ a { color: inherit; text-decoration: none; }
 }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); background-clip: content-box; }
 
-/* ---------- Reduced motion ---------- */
+/* ---------- Accessibility fallbacks ----------
+   Reduced motion is not "no feedback" — it is a gentler equivalent. Cross-fades
+   and colour changes survive; slides, overshoot and parallax do not. Previously
+   this block zeroed every duration, which also removed the focus and hover
+   affordances and left the UI feeling broken rather than calm. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 120ms !important;
   }
+  /* Keep these legible as fades, not movements. */
+  .materialize { animation: none !important; opacity: 1 !important; transform: none !important; }
+  .pressable:active { transform: none !important; }
+  .btn-primary:hover, .btn:hover { transform: none !important; }
+  .btn-search.lg:hover { transform: none !important; }
+  /* Kill the looping effects outright — sustained motion is the vestibular risk. */
+  .btn-primary::before { display: none; }
+  .shimmer, [class*="skeleton"] { animation: none !important; }
+}
+
+/* Frosted surfaces become opaque: translucency is a legibility liability when
+   the backdrop cannot be trusted to stay calm. */
+@media (prefers-reduced-transparency: reduce) {
+  .glass-bar, .glass-card {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: var(--surface-base) !important;
+  }
+}
+
+/* Near-solid surfaces with a defined edge. */
+@media (prefers-contrast: more) {
+  :root {
+    --border: rgba(255, 255, 255, 0.28);
+    --border-soft: rgba(255, 255, 255, 0.45);
+    --text-secondary: #c7d3cd;
+    --text-tertiary: #a8b5af;
+  }
+  .glass-bar, .glass-card { background: var(--surface-base) !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
 }

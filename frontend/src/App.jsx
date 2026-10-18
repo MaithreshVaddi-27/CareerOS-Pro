@@ -167,7 +167,7 @@ export default function App() {
                   <p className="text-secondary" style={{ fontSize: '1.0625rem' }}>
                     Start by searching for roles, stacks, or keywords — for example
                     {' '}<Tag color="blue">Software intern</Tag>
-                    {' '}<Tag color="purple">Machine learning</Tag>
+                    {' '}<Tag color="sky">Machine learning</Tag>
                     {' '}<Tag color="teal">Remote</Tag>.
                   </p>
                 </motion.div>

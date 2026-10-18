@@ -46,7 +46,7 @@ export default function Header({ view, onViewChange, llmProvider, providers = []
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-          <div className="tag tag-purple" style={{
+          <div className="tag tag-blue" style={{
             width: 36, height: 36, borderRadius: 'var(--r-2)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontWeight: 800, fontSize: '1.05rem',
