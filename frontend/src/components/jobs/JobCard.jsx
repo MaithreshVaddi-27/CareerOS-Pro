@@ -28,7 +28,7 @@ function MatchRing({ score }) {
   const pct = Math.round((score || 0) * 100);
   const r = 18, c = 2 * Math.PI * r;
   return (
-    <div style={{ position: 'relative', width: 44, height: 44, flexShrink: 0 }}>
+    <div className="match-ring">
       <svg width="44" height="44" viewBox="0 0 44 44">
         <circle cx="22" cy="22" r={r} fill="none" stroke="var(--color-border-strong)" strokeWidth="4" />
         <circle
@@ -36,13 +36,10 @@ function MatchRing({ score }) {
           stroke="var(--color-accent)" strokeWidth="4" strokeLinecap="round"
           strokeDasharray={c} strokeDashoffset={c - (c * pct) / 100}
           transform="rotate(-90 22 22)"
-          style={{ transition: 'stroke-dashoffset 0.6s cubic-bezier(0.25,0.1,0.25,1)' }}
+          className="match-ring__arc"
         />
       </svg>
-      <span style={{
-        position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: '0.7rem', fontWeight: 600, color: 'var(--color-text)',
-      }}>{pct}</span>
+      <span className="match-ring__value">{pct}</span>
     </div>
   );
 }
@@ -98,44 +95,23 @@ export default function JobCard({ job, onOpen, onSave, saved = false }) {
         style={{ opacity: saveOpacity }}
         aria-hidden="true"
       >
-        <div style={{
-          position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-          paddingRight: 'var(--space-5)', color: 'var(--color-green)', fontWeight: 600, pointerEvents: 'none',
-        }}>
+        <div className="jobcard-save-hint">
           Save ✓
         </div>
       </motion.div>
 
-      <div className="glass-card" style={{
-        borderRadius: 'var(--r-3)',
-        padding: 'var(--space-5)',
-        cursor: 'pointer',
-        position: 'relative',
-        overflow: 'hidden',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-4)' }}>
+      <div className="glass-card jobcard-body">
+        <div className="jobcard-head">
           {/* Company monogram */}
-          <div
-            style={{
-              width: 44, height: 44, borderRadius: 'var(--r-3)', flexShrink: 0,
-              background: 'var(--accent-soft)', color: 'var(--accent-1)',
-              border: '1px solid var(--accent-soft)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontWeight: 700, fontSize: '1.05rem',
-            }}
-          >
+          <div className="jobcard-monogram">
             {(job.company || '?').slice(0, 1).toUpperCase()}
           </div>
 
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
-              <div style={{ minWidth: 0 }}>
-                <h3 style={{
-                  fontSize: '1.0625rem', fontWeight: 600, letterSpacing: '-0.01em',
-                  lineHeight: 1.3, color: 'var(--color-text)',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>{job.title}</h3>
-                <p style={{ fontSize: '0.9375rem', color: 'var(--color-text-secondary)', marginTop: 2 }}>
+          <div className="jobcard-main">
+            <div className="jobcard-titlerow">
+              <div className="jobcard-titlebox">
+                <h3 className="jobcard-title">{job.title}</h3>
+                <p className="jobcard-company">
                   {job.company || 'Unknown'}
                 </p>
               </div>
@@ -143,7 +119,7 @@ export default function JobCard({ job, onOpen, onSave, saved = false }) {
             </div>
 
             {/* Tag row */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
+            <div className="jobcard-tags">
               <Tag color={isIntern ? 'sky' : 'blue'} dot>
                 {isIntern ? 'Internship' : job.employment_type || 'Full-time'}
               </Tag>
@@ -155,8 +131,8 @@ export default function JobCard({ job, onOpen, onSave, saved = false }) {
             </div>
 
             {/* Footer */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'var(--space-4)', paddingTop: 'var(--space-3)', borderTop: '1px solid var(--color-border)' }}>
-              <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-faint)' }}>
+            <div className="jobcard-footer">
+              <span className="jobcard-time">
                 {timeAgo(job.posted_at)}
               </span>
               <motion.span
@@ -164,10 +140,7 @@ export default function JobCard({ job, onOpen, onSave, saved = false }) {
                 whileTap={{ scale: 0.9 }}
                 whileHover={{ scale: 1.02 }}
                 onClick={(e) => { e.stopPropagation(); setCardSaved(!cardSaved); onSave?.(job); }}
-                style={{
-                  fontSize: '1.25rem', lineHeight: 1, cursor: 'pointer',
-                  color: cardSaved ? 'var(--accent-2)' : 'var(--color-text-faint)',
-                }}
+                className={`jobcard-save${cardSaved ? ' is-saved' : ''}`}
                 role="button"
                 tabIndex={0}
                 aria-label={cardSaved ? 'Unsave' : 'Save'}

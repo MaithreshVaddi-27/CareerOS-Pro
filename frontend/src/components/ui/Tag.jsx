@@ -14,14 +14,14 @@ const CLASSES = {
   sky: 'tag-sky',
   red: 'tag-red',
   yellow: 'tag-yellow',
-  neutral: 'tag',
+  neutral: 'tag tag-neutral',
 };
 
 export default function Tag({ children, color = 'neutral', dot = false, className = '' }) {
   const cls = CLASSES[color] || CLASSES.neutral;
   return (
     <span className={`${cls} ${className}`.trim()}>
-      {dot && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', flexShrink: 0, opacity: 0.9 }} />}
+      {dot && <span className="tag-dot" />}
       {children}
     </span>
   );

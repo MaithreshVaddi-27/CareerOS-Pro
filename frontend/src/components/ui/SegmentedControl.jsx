@@ -19,29 +19,16 @@ export default function SegmentedControl({ options, value, onChange, ariaLabel }
 
   return (
     <div
-      className="glass-card"
+      className="glass-card segmented"
       role="radiogroup"
       aria-label={ariaLabel}
-      style={{
-        position: 'relative',
-        display: 'inline-flex',
-        borderRadius: 'var(--r-3)',
-        padding: 3,
-      }}
     >
       {/* Animated pill — layout projection handles position/size */}
       <motion.div
         layout
         transition={defaultSpring}
-        style={{
-          position: 'absolute',
-          top: 3,
-          bottom: 3,
-          borderRadius: 'var(--r-1)',
-          background: 'var(--color-accent)',
-          boxShadow: 'var(--shadow-glow)',
-          ...getStyle(),
-        }}
+        className="segmented-pill"
+        style={getStyle()}
       />
       {options.map((opt) => (
         <motion.button
@@ -50,19 +37,7 @@ export default function SegmentedControl({ options, value, onChange, ariaLabel }
           role="radio"
           aria-checked={opt.value === value}
           onClick={() => onChange(opt.value)}
-          style={{
-            position: 'relative',
-            zIndex: 1,
-            padding: '7px 18px',
-            fontSize: '0.875rem',
-            fontWeight: 500,
-            color: opt.value === value ? 'var(--text-on-accent)' : 'var(--text-secondary)',
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            whiteSpace: 'nowrap',
-            transition: 'color 180ms ease',
-          }}
+className="segmented-option"
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.96 }}
           transition={{ type: 'spring', bounce: 0, duration: 0.2 }}

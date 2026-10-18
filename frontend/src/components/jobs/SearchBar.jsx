@@ -30,38 +30,31 @@ export default function SearchBar({ onSearch, loading }) {
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ type: 'spring', bounce: 0, duration: 0.5 }}
-      className="glass-card"
-      style={{
-        borderRadius: 'var(--r-4)',
-        padding: 'var(--space-5)',
-        boxShadow: 'var(--shadow-lg)',
-      }}
+      className="glass-card searchbar"
     >
-      <div className="section-title text-secondary" style={{ marginBottom: 'var(--space-3)' }}>
+      <div className="section-title text-secondary searchbar-title">
         Find your next role
       </div>
-      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-        <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
-            <span className="text-tertiary" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', fontSize: '1.1rem', pointerEvents: 'none', opacity: 0.9 }}>⌕</span>
+      <form onSubmit={submit} className="searchbar-form">
+        <div className="searchbar-row">
+          <div className="searchbar-field searchbar-field--query">
+            <span className="searchbar-glyph">⌕</span>
             <input
-              className="input"
-              style={{ paddingLeft: 40, height: 52, fontSize: '1.0625rem' }}
+              className="input searchbar-input"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search roles, skills, keywords…"
               aria-label="Search query"
             />
           </div>
-          <div style={{ position: 'relative', flexBasis: 220, flexGrow: 1, height: 52 }}>
-            <span className="text-tertiary" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', fontSize: '1.1rem', pointerEvents: 'none', opacity: 0.9 }}>⌖</span>
+          <div className="searchbar-field searchbar-field--location">
+            <span className="searchbar-glyph">⌖</span>
             <input
-              className="input"
+              className="input searchbar-input"
               value={location}
               onChange={(e) => setLocation(e.target.value)}
               placeholder="Location (India default)"
               aria-label="Location"
-              style={{ paddingLeft: 40 }}
             />
           </div>
           <motion.button
@@ -70,14 +63,13 @@ export default function SearchBar({ onSearch, loading }) {
             whileTap={{ scale: 0.96 }}
             whileHover={{ scale: 1.02 }}
             transition={{ type: 'spring', bounce: 0, duration: 0.25 }}
-            className="btn btn-search lg"
-            style={{ height: 52, whiteSpace: 'nowrap' }}
+            className="btn btn-search lg searchbar-submit"
           >
             {loading ? 'Searching…' : 'Search'}
           </motion.button>
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
+        <div className="searchbar-toggle">
           <SegmentedControl options={JOB_TYPE} value={jobType} onChange={setJobType} ariaLabel="Job type" />
         </div>
       </form>

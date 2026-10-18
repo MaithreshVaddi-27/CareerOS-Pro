@@ -52,16 +52,10 @@ export default function Filters({ filters, onChange }) {
   const set = (patch) => onChange({ ...filters, ...patch });
 
   return (
-    <div className="glass-card" style={{
-      borderRadius: 'var(--r-3)',
-      padding: 'var(--space-5)',
-      marginTop: 'var(--space-3)',
-      display: 'grid',
-      gap: 'var(--space-5)',
-    }}>
+    <div className="glass-card filters">
               {/* Source */}
               <FilterRow label="Source">
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+                <div className="filter-chips">
                   {SOURCES.map((src) => {
                     const active = (filters.sources || []).includes(src);
                     return (
@@ -124,7 +118,7 @@ export default function Filters({ filters, onChange }) {
               </FilterRow>
 
               {/* Salary range */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
+              <div className="filter-pair">
                 <FilterRow label="Min salary (₹/yr)" stacked htmlFor="salary-min">
                   <input
                     id="salary-min"
@@ -135,7 +129,6 @@ export default function Filters({ filters, onChange }) {
                     value={filters.salary_min || ''}
                     onChange={(e) => set({ salary_min: e.target.value })}
                     placeholder="e.g. 300000"
-                    style={{ height: 44 }}
                   />
                 </FilterRow>
                 <FilterRow label="Max salary (₹/yr)" stacked htmlFor="salary-max">
@@ -148,7 +141,6 @@ export default function Filters({ filters, onChange }) {
                     value={filters.salary_max || ''}
                     onChange={(e) => set({ salary_max: e.target.value })}
                     placeholder="e.g. 1200000"
-                    style={{ height: 44 }}
                   />
                 </FilterRow>
               </div>
@@ -157,31 +149,9 @@ export default function Filters({ filters, onChange }) {
 }
 
 function FilterRow({ label, children, stacked = false, htmlFor }) {
-  const rowStyle = {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 'var(--space-4)',
-    flexWrap: 'wrap',
-  };
-  if (stacked) {
-    rowStyle.display = 'block';
-    rowStyle.flexDirection = 'column';
-    rowStyle.alignItems = 'stretch';
-    rowStyle.gap = 'var(--space-2)';
-  }
   return (
-    <div style={rowStyle}>
-      <label
-        htmlFor={htmlFor}
-        style={{
-          fontSize: '0.875rem',
-          fontWeight: 500,
-          color: 'var(--color-text-secondary)' ,
-          ...(stacked && { marginBottom: 'var(--space-1)' })
-        }}
-      >{label}</label>
+    <div className={`filter-row${stacked ? ' filter-row--stacked' : ''}`}>
+      <label htmlFor={htmlFor} className="filter-label">{label}</label>
       {children}
     </div>
   );

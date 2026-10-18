@@ -66,20 +66,12 @@ export default function Modal({ open, onClose, children, title }) {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 1000,
-            display: 'flex',
-            alignItems: 'flex-end',
-            justifyContent: 'center',
-            padding: 'var(--space-4)',
-          }}
+          className="modal-overlay"
         >
           {/* Scrim */}
           <div
             onClick={onClose}
-            style={{ position: 'absolute', inset: 0, background: 'var(--color-scrim)', backdropFilter: 'blur(4px)' }}
+            className="modal-scrim"
           />
           {/* Sheet */}
           <motion.div
@@ -87,33 +79,18 @@ export default function Modal({ open, onClose, children, title }) {
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: '100%', opacity: 0.4 }}
             transition={springPresets.drawer}
-            className="glass-card"
+            className="glass-card modal-sheet"
             role="dialog"
             aria-modal="true"
             aria-label={title}
             ref={containerRef}
-            style={{
-              position: 'relative',
-              width: '100%',
-              maxWidth: 640,
-              maxHeight: '85vh',
-              overflowY: 'auto',
-              borderRadius: 'var(--r-5) var(--r-5) var(--r-3) var(--r-3)',
-              padding: 'var(--space-5)',
-              boxShadow: 'var(--shadow-lg)',
-            }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
+            <div className="modal-head">
               {title && <h2 className="section-title">{title}</h2>}
               <motion.button
                 onClick={onClose}
                 aria-label="Close"
-                style={{
-                  width: 30, height: 30, borderRadius: '50%',
-                  background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '1.1rem', lineHeight: 1,
-                }}
+                className="modal-close"
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 transition={{ type: 'spring', bounce: 0.2, duration: 0.2 }}

@@ -78,18 +78,10 @@ export default function App() {
   const visible = view === 'saved' ? saved : results;
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div className="app-shell">
       <Header view={view} onViewChange={setView} llmProvider={llmProvider} providers={LLM_PROVIDERS} onProviderChange={setLLMProvider} />
 
-      <main
-        style={{
-          maxWidth: 1100,
-          width: '100%',
-          margin: '0 auto',
-          padding: 'var(--space-6) var(--space-4)',
-          flex: 1,
-        }}
-      >
+      <main className="app-main">
         <motion.div
           initial={{ opacity: 0, y: reducedMotion ? 0 : 6 }}
           animate={{ opacity: 1, y: reducedMotion ? 0 : 0 }}
@@ -100,23 +92,18 @@ export default function App() {
 
         {view !== 'profile' && (
           <>
-            <motion.div style={{ marginTop: 'var(--space-5)' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={reducedMotion ? { delay: 0.05, duration: 0.2 } : { delay: 0.05, ...defaultSpring }}>
+            <motion.div className="app-filters" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={reducedMotion ? { delay: 0.05, duration: 0.2 } : { delay: 0.05, ...defaultSpring }}>
               <Filters filters={filters} onChange={setFilters} />
             </motion.div>
 
             <motion.div
-              style={{
-                marginTop: 'var(--space-6)',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'baseline',
-              }}
+              className="app-resultshead"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={reducedMotion ? { delay: 0.1, duration: 0.2 } : { delay: 0.1, ...defaultSpring }}
             >
               <h2 className="section-title">{view === 'saved' ? 'Saved opportunities' : 'Recommended'}</h2>
-              <span className="text-tertiary" style={{ fontSize: '0.875rem' }}>{visible.length} results</span>
+              <span className="app-resultcount">{visible.length} results</span>
             </motion.div>
 
             <AnimatePresence>
@@ -126,21 +113,14 @@ export default function App() {
                   animate={{ opacity: 1, y: reducedMotion ? 0 : 0 }}
                   exit={{ opacity: 0, y: reducedMotion ? 0 : -4 }}
                   transition={reducedMotion ? { opacity: { duration: 0.2 } } : defaultSpring}
-                  style={{
-                    marginTop: 'var(--space-4)',
-                    padding: 'var(--space-4)',
-                    borderRadius: 'var(--r-3)',
-                    background: 'var(--red-soft)',
-                    border: '1px solid rgba(230, 59, 59, 0.28)',
-                    color: 'var(--red)',
-                  }}
+                  className="app-error"
                 >
                   {error}
                 </motion.div>
               ) : null}
             </AnimatePresence>
 
-            <section style={{ marginTop: 'var(--space-4)', display: 'grid', gap: 'var(--space-3)' }}>
+            <section className="app-list">
               <AnimatePresence mode="popLayout">
                 {showSkeleton && <SkeletonGrid />}
                 {visible.map((job, idx) => (
@@ -163,8 +143,8 @@ export default function App() {
               </AnimatePresence>
 
               {!loading && !visible.length ? (
-                <motion.div layout className="glass-card" style={{ padding: 'var(--space-8)', textAlign: 'center' }}>
-                  <p className="text-secondary" style={{ fontSize: '1.0625rem' }}>
+                <motion.div layout className="glass-card app-empty">
+                  <p className="text-secondary">
                     Start by searching for roles, stacks, or keywords — for example
                     {' '}<Tag color="blue">Software intern</Tag>
                     {' '}<Tag color="sky">Machine learning</Tag>
@@ -184,17 +164,16 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={defaultSpring}
-              className="glass-card"
-              style={{ padding: 'var(--space-6)', marginTop: 'var(--space-5)', borderRadius: 'var(--r-4)' }}
+              className="glass-card app-profile"
             >
-              <h2 className="section-title" style={{ marginBottom: 'var(--space-2)' }}>Profile</h2>
+              <h2 className="section-title">Profile</h2>
               <p className="text-secondary">Resume parsing, skills, and application tracker will appear here.</p>
             </motion.section>
           )}
         </AnimatePresence>
       </main>
 
-      <footer style={{ textAlign: 'center', padding: 'var(--space-6)', color: 'var(--color-text-tertiary)', fontSize: '0.8125rem' }}>
+      <footer className="app-footer">
         CareerOS · Designed like it matters
       </footer>
 

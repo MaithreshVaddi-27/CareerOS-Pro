@@ -11,7 +11,6 @@
 
   /* Surfaces — warm-tinted near-black, so the emerald has something to sit on */
   --bg-deep: #07090a;
-  --bg-card: #0e1211;
   --bg-card-hover: #141a18;
   --surface-base: #0e1211;
   --surface-elevated: #141a18;
@@ -33,13 +32,8 @@
   --accent-1: #10b981;
   --accent-2: #34d399;
   --accent-3: #2dd4bf;
-  --accent-4: #f59e0b;
-  --accent-5: #38bdf8;
   --accent: var(--accent-1);
-  --accent-hover: #0ea371;
-  --accent-press: #0b7d56;
   --accent-soft: rgba(16, 185, 129, 0.16);
-  --accent-faint: rgba(16, 185, 129, 0.06);
   --accent-glow: rgba(16, 185, 129, 0.38);
 
   /* Functional (use sparingly) */
@@ -58,8 +52,6 @@
 
   /* Depth */
   --scrim: rgba(4, 6, 5, 0.62);
-  --scrim-heavy: rgba(4, 6, 5, 0.84);
-
   /* Radius scale */
   --r-1: 10px;
   --r-2: 14px;
@@ -93,15 +85,6 @@
 
   /* Backward-compat aliases for existing component classes */
   --color-accent: var(--accent);
-  --color-accent-hover: var(--accent-hover);
-  --color-accent-press: var(--accent-press);
-  --color-accent-soft: var(--accent-soft);
-  --color-accent-glow: var(--accent-glow);
-  --color-bg: var(--bg-deep);
-  --color-bg-subtle: var(--bg-card);
-  --color-surface: var(--surface-glass);
-  --color-surface-solid: var(--surface-base);
-  --color-surface-elevated: var(--surface-elevated);
   --color-surface-hover: var(--bg-card-hover);
   --color-text: var(--text);
   --color-text-secondary: var(--text-secondary);
@@ -110,17 +93,7 @@
   --color-border: var(--border);
   --color-border-strong: var(--border-soft);
   --color-scrim: var(--scrim);
-  --color-green: var(--green); --color-green-soft: var(--green-soft);
-  --color-orange: var(--orange); --color-orange-soft: var(--orange-soft);
-  --color-cyan: var(--cyan); --color-cyan-soft: var(--cyan-soft);
-  --color-sky: var(--sky); --color-sky-soft: var(--sky-soft);
-  --color-red: var(--red); --color-red-soft: var(--red-soft);
-  --color-yellow: var(--yellow); --color-yellow-soft: var(--yellow-soft);
-  --radius-sm: var(--r-1);
-  --radius-md: var(--r-2);
-  --radius-lg: var(--r-3);
-  --radius-xl: var(--r-4);
-  --radius-2xl: var(--r-5);
+  --color-green: var(--green);
 }
 
 /* Light mode is deliberately not offered. The previous block was a light theme
@@ -156,17 +129,6 @@ input, textarea, select { font: inherit; color: inherit; }
 a { color: inherit; text-decoration: none; }
 
 /* ---------- Type ---------- */
-.page-heading {
-  font-family: var(--font-display);
-  font-size: clamp(2.2rem, 5vw, 3.75rem);
-  letter-spacing: -0.020em;
-  line-height: 1.08;
-  font-weight: 700;
-  background: linear-gradient(180deg, #ffffff 0%, var(--text-secondary) 130%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
 .section-title {
   font-family: var(--font-display);
   font-size: 1.5rem;
@@ -176,12 +138,6 @@ a { color: inherit; text-decoration: none; }
   color: var(--text);
 }
 .text-secondary { color: var(--text-secondary); }
-.text-tertiary { color: var(--text-tertiary); }
-.text-faint { color: var(--text-faint); }
-
-/* ---------- Surfaces ---------- */
-.surface-base { background: var(--surface-base); }
-.surface-elevated { background: var(--surface-elevated); }
 
 .glass-bar {
   backdrop-filter: saturate(170%) blur(22px);
@@ -275,14 +231,6 @@ a { color: inherit; text-decoration: none; }
 .btn-secondary:hover { background: var(--bg-card-hover); border-color: var(--border-hover); box-shadow: var(--shadow-sm); }
 .btn-secondary:active { transform: scale(0.97); }
 
-.btn-ghost {
-  background: transparent;
-  color: var(--text-secondary);
-  padding: 11px 18px; font-size: 0.9375rem;
-  transition: color var(--dur-hover) var(--ease-out), background var(--dur-hover) var(--ease-out);
-}
-.btn-ghost:hover { color: #fff; background: var(--accent-faint); box-shadow: var(--shadow-sm) inset; }
-
 .btn-lg { padding: 14px 30px; font-size: 1.0625rem; }
 .btn-sm { padding: 7px 16px; font-size: 0.875rem; }
 
@@ -290,7 +238,6 @@ a { color: inherit; text-decoration: none; }
 .btn-search {
   --accent: var(--accent-3);
   --accent-soft: rgba(45, 212, 191, 0.25);
-  --accent-faint: rgba(45, 212, 191, 0.08);
 }
 .btn-search.lg {
   background: linear-gradient(135deg, var(--accent-3), var(--accent-1));
@@ -368,14 +315,27 @@ a { color: inherit; text-decoration: none; }
   box-shadow: var(--shadow-sm);
 }
 .tag:active { transform: scale(0.96); }
-.tag-blue:hover    { background: rgba(16, 185, 129, 0.20); border-color: rgba(16, 185, 129, 0.48); }
-.tag-green:hover   { background: rgba(34, 197, 94, 0.20); border-color: rgba(34, 197, 94, 0.48); color: #a7f3c8; }
-.tag-orange:hover  { background: rgba(245, 158, 11, 0.20); border-color: rgba(245, 158, 11, 0.48); color: #ffecb3; }
-.tag-teal:hover    { background: rgba(34, 211, 238, 0.20); border-color: rgba(34, 211, 238, 0.48); color: #a5f3fc; }
-.tag-sky:hover    { background: rgba(56, 189, 248, 0.20); border-color: rgba(56, 189, 248, 0.48); color: #bae6fd; }
-.tag-red:hover     { background: rgba(239, 68, 68, 0.20); border-color: rgba(239, 68, 68, 0.48); color: #fecaca; }
-.tag-yellow:hover  { background: rgba(245, 194, 26, 0.20); border-color: rgba(245, 194, 26, 0.48); color: #fff; }
-.tag-neutral:hover { background: rgba(255,255,255,0.07); border-color: var(--border); }
+/* Hue lives here, once. These rules used to exist only as :hover, so every tag
+   in the app rendered colourless until hovered; the palette tokens below were
+   defined but unreferenced because nothing painted with them. */
+.tag-blue    { background: var(--green-soft);    border-color: var(--green);    color: var(--green); }
+.tag-green   { background: var(--green-soft);    border-color: var(--green);    color: var(--green); }
+.tag-orange  { background: var(--orange-soft);   border-color: var(--orange);   color: var(--orange); }
+.tag-teal    { background: var(--cyan-soft);     border-color: var(--cyan);     color: var(--cyan); }
+.tag-sky     { background: var(--sky-soft);      border-color: var(--sky);      color: var(--sky); }
+.tag-red     { background: var(--red-soft);      border-color: var(--red);      color: var(--red); }
+.tag-yellow  { background: var(--yellow-soft);   border-color: var(--yellow);   color: var(--yellow); }
+.tag-neutral { background: rgba(255, 255, 255, 0.05); border-color: var(--border); color: var(--text-secondary); }
+
+/* Hover lifts the fill and strengthens the edge. Sourced from the same tokens so
+   a palette change lands in both states at once. */
+.tag-blue:hover, .tag-green:hover { background: color-mix(in srgb, var(--green) 20%, transparent); border-color: color-mix(in srgb, var(--green) 48%, transparent); }
+.tag-orange:hover { background: color-mix(in srgb, var(--orange) 20%, transparent); border-color: color-mix(in srgb, var(--orange) 48%, transparent); }
+.tag-teal:hover   { background: color-mix(in srgb, var(--cyan) 20%, transparent);  border-color: color-mix(in srgb, var(--cyan) 48%, transparent); }
+.tag-sky:hover    { background: color-mix(in srgb, var(--sky) 20%, transparent);   border-color: color-mix(in srgb, var(--sky) 48%, transparent); }
+.tag-red:hover    { background: color-mix(in srgb, var(--red) 20%, transparent);    border-color: color-mix(in srgb, var(--red) 48%, transparent); }
+.tag-yellow:hover { background: color-mix(in srgb, var(--yellow) 20%, transparent); border-color: color-mix(in srgb, var(--yellow) 48%, transparent); }
+.tag-neutral:hover { background: rgba(255, 255, 255, 0.07); border-color: var(--border-hover); }
 
 /* ---------- Skeleton ---------- */
 @keyframes shimmer {
@@ -396,18 +356,6 @@ a { color: inherit; text-decoration: none; }
   to   { opacity: 1; transform: scale(1); }
 }
 .materialize { animation: materialize var(--dur-reveal) var(--ease-spring) both; }
-
-/* Scroll-edge fade where content passes under floating chrome. A hard 1px rule
-   under a translucent bar reads as a seam; this reads as the bar sitting on top. */
-.scroll-edge {
-  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 18px);
-  mask-image: linear-gradient(180deg, transparent 0, #000 18px);
-}
-
-/* Press feedback on pointer-down, not on release — the highlight must be there
-   before the finger lifts or the control feels dead. */
-.pressable { transition: transform var(--dur-press) var(--ease-out), box-shadow var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out); }
-.pressable:active { transform: scale(0.975); }
 
 /* ---------- Scrollbar ---------- */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -432,7 +380,6 @@ a { color: inherit; text-decoration: none; }
   }
   /* Keep these legible as fades, not movements. */
   .materialize { animation: none !important; opacity: 1 !important; transform: none !important; }
-  .pressable:active { transform: none !important; }
   .btn-primary:hover, .btn:hover { transform: none !important; }
   .btn-search.lg:hover { transform: none !important; }
   /* Kill the looping effects outright — sustained motion is the vestibular risk. */
@@ -459,4 +406,473 @@ a { color: inherit; text-decoration: none; }
     --text-tertiary: #a8b5af;
   }
   .glass-bar, .glass-card { background: var(--surface-base) !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+}
+/* ---------- Modal ---------- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: var(--space-4);
+}
+.modal-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--color-scrim);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.modal-sheet {
+  position: relative;
+  width: 100%;
+  max-width: 640px;
+  max-height: 85vh;
+  overflow-y: auto;
+  border-radius: var(--r-5) var(--r-5) var(--r-3) var(--r-3);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-lg);
+}
+.modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-4);
+}
+.modal-close {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: none;
+  background: var(--color-surface-hover);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* ---------- SegmentedControl ---------- */
+.segmented {
+  position: relative;
+  display: inline-flex;
+  border-radius: var(--r-3);
+  padding: 3px;
+}
+/* left/width are measured at runtime and applied by framer-motion. */
+.segmented-pill {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: var(--r-1);
+  background: var(--color-accent);
+  box-shadow: var(--shadow-glow);
+}
+.segmented-option {
+  position: relative;
+  z-index: 1;
+  padding: 7px 18px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 180ms ease;
+  color: var(--color-text-secondary);
+}
+.segmented-option[aria-checked="true"] { color: var(--text-on-accent); }
+
+/* ---------- SkeletonGrid ---------- */
+.skeleton-grid { display: grid; gap: var(--space-3); }
+.skeleton-row {
+  border-radius: var(--r-3);
+  padding: var(--space-5);
+  display: flex;
+  gap: var(--space-4);
+  height: 104px;
+  overflow: hidden;
+  position: relative;
+}
+.skeleton-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--r-2);
+  flex-shrink: 0;
+}
+.skeleton-body {
+  flex: 1;
+  display: grid;
+  gap: var(--space-3);
+  align-content: center;
+  min-width: 0;
+}
+.skeleton-bar { border-radius: 9999px; }
+.skeleton-bar--title { height: 14px; width: 70%; }
+.skeleton-bar--meta  { height: 12px; width: 45%; }
+.skeleton-bar--tail  { height: 10px; width: 30%; }
+/* One sweep, three intensities. The gradient peak dims per bar so the stack
+   reads as depth instead of three bars blinking in unison. */
+.skeleton-bar, .skeleton-avatar {
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+  background-image: linear-gradient(110deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.10) 40%, rgba(255, 255, 255, 0.04) 60%);
+}
+.skeleton-bar--meta { background-image: linear-gradient(110deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.09) 40%, rgba(255, 255, 255, 0.04) 60%); }
+.skeleton-bar--tail { background-image: linear-gradient(110deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.07) 40%, rgba(255, 255, 255, 0.04) 60%); }
+
+/* Reduced motion freezes the shimmer rather than removing it — a pulsing
+   placeholder still reads as "loading"; a static one reads as "broken". */
+.skeleton-grid.is-paused .skeleton-bar,
+.skeleton-grid.is-paused .skeleton-avatar { animation-play-state: paused; }
+
+/* Tag dot marker. */
+.tag-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+/* ---------- Filters ---------- */
+.filters {
+  border-radius: var(--r-3);
+  padding: var(--space-5);
+  margin-top: var(--space-3);
+  display: grid;
+  gap: var(--space-5);
+}
+.filter-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.filter-row--stacked {
+  display: block;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+.filter-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+.filter-row--stacked .filter-label { margin-bottom: var(--space-1); }
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.filter-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+.filter-pair .input { height: 44px; }
+
+/* ---------- SearchBar ---------- */
+.searchbar {
+  border-radius: var(--r-4);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-lg);
+}
+.searchbar-title { margin-bottom: var(--space-3); }
+.searchbar-form { display: flex; flex-direction: column; gap: var(--space-4); }
+.searchbar-row {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  align-items: center;
+}
+/* Field wrapper positions the glyph inside the input. */
+.searchbar-field { position: relative; display: flex; }
+.searchbar-field--query { flex: 1; min-width: 200px; }
+.searchbar-field--location { flex-basis: 220px; flex-grow: 1; }
+.searchbar-glyph {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 1.1rem;
+  pointer-events: none;
+  opacity: 0.9;
+  color: var(--color-text-tertiary);
+}
+.searchbar-input { padding-left: 40px; }
+.searchbar-field--query .searchbar-input { height: 52px; font-size: 1.0625rem; }
+.searchbar-field--location { height: 52px; }
+.searchbar-submit { height: 52px; white-space: nowrap; }
+.searchbar-toggle { display: flex; justify-content: center; }
+
+/* ---------- JobCard ---------- */
+.match-ring { position: relative; width: 44px; height: 44px; flex-shrink: 0; }
+.match-ring__value {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+/* Dash offset is animated per-score; only the timing lives here. */
+.match-ring__arc { transition: stroke-dashoffset 0.6s cubic-bezier(0.25, 0.1, 0.25, 1); }
+
+.jobcard-save-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: var(--space-5);
+  color: var(--color-green);
+  font-weight: 600;
+  pointer-events: none;
+}
+.jobcard-body {
+  border-radius: var(--r-3);
+  padding: var(--space-5);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+.jobcard-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+.jobcard-monogram {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-3);
+  flex-shrink: 0;
+  background: var(--accent-soft);
+  color: var(--accent-1);
+  border: 1px solid var(--accent-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.jobcard-main { flex: 1; min-width: 0; }
+.jobcard-titlerow {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.jobcard-titlebox { min-width: 0; }
+.jobcard-title {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jobcard-company { font-size: 0.9375rem; color: var(--color-text-secondary); margin-top: 2px; }
+.jobcard-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.jobcard-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+.jobcard-time { font-size: 0.8125rem; color: var(--color-text-faint); }
+.jobcard-save {
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--color-text-faint);
+}
+.jobcard-save.is-saved { color: var(--accent-2); }
+
+/* ---------- JobDetail ---------- */
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+.detail-monogram {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--r-3);
+  background: linear-gradient(135deg, var(--bg-card-hover), var(--surface-base));
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 1.3rem;
+  color: var(--text-secondary);
+}
+.detail-company { font-size: 1.25rem; font-weight: 600; color: var(--text); }
+.detail-location { color: var(--text-secondary); font-size: 0.9375rem; }
+.detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+.detail-section { margin-bottom: var(--space-5); }
+.detail-section > .section-title { margin-bottom: var(--space-3); }
+.detail-block { margin-bottom: var(--space-3); }
+.detail-label {
+  font-size: 0.8125rem;
+  color: var(--color-text-tertiary);
+  margin-bottom: var(--space-2);
+}
+.detail-skillrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.detail-explanation {
+  margin-top: var(--space-3);
+  font-size: 0.9375rem;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+.detail-body {
+  color: var(--color-text-secondary);
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+.detail-actions {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+/* ---------- Header ---------- */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  padding: var(--space-3) 0;
+  transition: padding 200ms ease;
+}
+.app-header.is-scrolled { padding: var(--space-2) 0; }
+.app-header__bar {
+  max-width: 1200px;
+  margin: 0 auto;
+  border-radius: var(--r-4);
+  padding: var(--space-2) var(--space-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  transition: border-radius 200ms ease, box-shadow 200ms ease;
+}
+.app-header__bar.is-scrolled {
+  border-radius: var(--r-3);
+  box-shadow: var(--shadow-md);
+}
+.app-header__brand { display: flex; align-items: center; gap: var(--space-3); }
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 1.05rem;
+  background: var(--green-soft);
+  border: 1px solid var(--green);
+  box-shadow: var(--accent-glow);
+}
+.brand-name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-size: 1.0625rem;
+}
+.app-header__nav { display: flex; gap: var(--space-1); }
+.nav-btn {
+  padding: 8px 14px;
+  border: none;
+  border-radius: var(--r-2);
+  font-size: 0.875rem;
+  font-weight: 500;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease;
+}
+.nav-btn[aria-current="page"] { background: var(--bg-card-hover); color: var(--text); }
+.app-header__provider {
+  height: 36px;
+  padding: 0 32px 0 12px;
+  font-size: 0.8125rem;
+  min-width: 140px;
+}
+
+/* ---------- App shell ---------- */
+.app-shell { min-height: 100vh; display: flex; flex-direction: column; }
+.app-main {
+  max-width: 1100px;
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4);
+  flex: 1;
+}
+.app-filters { margin-top: var(--space-5); }
+.app-resultshead {
+  margin-top: var(--space-6);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.app-resultcount { font-size: 0.875rem; color: var(--color-text-tertiary); }
+.app-error {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--r-3);
+  background: var(--red-soft);
+  border: 1px solid color-mix(in srgb, var(--red) 28%, transparent);
+  color: var(--red);
+}
+.app-list {
+  margin-top: var(--space-4);
+  display: grid;
+  gap: var(--space-3);
+}
+.app-empty {
+  padding: var(--space-8);
+  text-align: center;
+}
+.app-empty p { font-size: 1.0625rem; }
+.app-profile {
+  padding: var(--space-6);
+  margin-top: var(--space-5);
+  border-radius: var(--r-4);
+}
+.app-profile .section-title { margin-bottom: var(--space-2); }
+.app-footer {
+  text-align: center;
+  padding: var(--space-6);
+  color: var(--color-text-tertiary);
+  font-size: 0.8125rem;
 }

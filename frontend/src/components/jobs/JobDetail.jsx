@@ -9,23 +9,17 @@ export default function JobDetail({ job, onClose, onVerify, verifying }) {
 
   return (
     <Modal open={Boolean(job)} onClose={onClose} title={job.title}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', marginBottom: 'var(--space-5)' }}>
-        <div style={{
-          width: 56, height: 56, borderRadius: 'var(--r-3)',
-          background: 'linear-gradient(135deg, var(--bg-card-hover), var(--surface-base))',
-          border: '1px solid var(--border)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontWeight: 600, fontSize: '1.3rem', color: 'var(--text-secondary)',
-        }}>
+      <div className="detail-head">
+        <div className="detail-monogram">
           {(job.company || '?').slice(0, 1).toUpperCase()}
         </div>
         <div>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--text)' }}>{job.company || 'Unknown'}</h3>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9375rem' }}>{job.location || 'Location unspecified'}</p>
+          <h3 className="detail-company">{job.company || 'Unknown'}</h3>
+          <p className="detail-location">{job.location || 'Location unspecified'}</p>
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-5)' }}>
+      <div className="detail-tags">
         <Tag color={isIntern ? 'sky' : 'blue'} dot>
           {isIntern ? 'Internship' : job.employment_type || 'Full-time'}
         </Tag>
@@ -39,26 +33,26 @@ export default function JobDetail({ job, onClose, onVerify, verifying }) {
       </div>
 
       {(job.matched_skills || job.missing_skills) ? (
-        <section style={{ marginBottom: 'var(--space-5)' }}>
-          <h4 className="section-title" style={{ marginBottom: 'var(--space-3)' }}>AI Analysis</h4>
+        <section className="detail-section">
+          <h4 className="section-title">AI Analysis</h4>
           {Array.isArray(job.matched_skills) && job.matched_skills.length ? (
-            <div style={{ marginBottom: 'var(--space-3)' }}>
-              <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-2)' }}>MATCHED</p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+            <div className="detail-block">
+              <p className="detail-label">MATCHED</p>
+              <div className="detail-skillrow">
                 {job.matched_skills.map((s) => <Tag key={s} color="green">{s}</Tag>)}
               </div>
             </div>
           ) : null}
           {Array.isArray(job.missing_skills) && job.missing_skills.length ? (
             <div>
-              <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-2)' }}>GAP</p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+              <p className="detail-label">GAP</p>
+              <div className="detail-skillrow">
                 {job.missing_skills.map((s) => <Tag key={s} color="orange">{s}</Tag>)}
               </div>
             </div>
           ) : null}
           {job.explanation ? (
-            <p style={{ marginTop: 'var(--space-3)', fontSize: '0.9375rem', color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
+            <p className="detail-explanation">
               {job.explanation}
             </p>
           ) : null}
@@ -66,18 +60,13 @@ export default function JobDetail({ job, onClose, onVerify, verifying }) {
       ) : null}
 
       {job.description ? (
-        <section style={{ marginBottom: 'var(--space-5)' }}>
-          <h4 className="section-title" style={{ marginBottom: 'var(--space-3)' }}>Description</h4>
-          <p style={{
-            color: 'var(--color-text-secondary)',
-            fontSize: '0.9375rem',
-            lineHeight: 1.7,
-            whiteSpace: 'pre-wrap',
-          }}>{job.description}</p>
+        <section className="detail-section">
+          <h4 className="section-title">Description</h4>
+          <p className="detail-body">{job.description}</p>
         </section>
       ) : null}
 
-      <div style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 'var(--space-5)' }}>
+      <div className="detail-actions">
         {job.apply_url ? (
           <Button variant="primary" size="lg" onClick={() => window.open(job.apply_url, '_blank', 'noopener')}>
             Apply →
