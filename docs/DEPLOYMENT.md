@@ -141,7 +141,7 @@ The compose file builds from the repo-root `Dockerfile` for the backend and
 - [ ] `APP_ENV=production` — enables durable MySQL checkpoints
 - [ ] `CHECKPOINT_STRICT=true` — fail fast rather than lose checkpoints silently
 - [ ] `REDIS_URL` set **if** running more than one worker
-- [ ] `API_KEY` is long, random, and rotated out of band
+- [ ] `API_KEY` is long and random
 - [ ] `RATE_LIMIT_PER_MINUTE` set deliberately
 - [ ] `ALLOWED_ORIGINS` lists only real frontend origins
 - [ ] MySQL 8.x
@@ -149,6 +149,37 @@ The compose file builds from the repo-root `Dockerfile` for the backend and
 - [ ] TLS terminated in front of the API
 - [ ] `COMPANY_SCRAPER_USER_AGENT` identifies you with a contact URL
 - [ ] Health checks pointed at `/health/ready`
+
+> ### ⚠️ `API_KEY` is not a secret, and cannot be made one this way
+>
+> The checklist item above deliberately does *not* say "rotated out of band".
+> That claim used to be here and it was wrong.
+>
+> `docker-compose.yml` passes `VITE_API_KEY` to the frontend as a **build arg**,
+> and Vite inlines every `VITE_*` variable into the JavaScript bundle at build
+> time. Verified: building with `VITE_API_KEY=SUPERSECRET_PROBE_KEY` produces a
+> `dist/assets/*.js` containing that literal string.
+>
+> So the key the browser sends is readable by anyone via view-source, and the
+> API is directly callable without going through the browser at all. `CORS`
+> does not help here — it constrains browsers, not `curl`.
+>
+> What `API_KEY` actually buys you:
+>
+> - it stops anonymous drive-by traffic that does not know to look for it;
+> - it keeps casual browser consoles and stray scripts out;
+> - it rate-limits a known caller instead of the whole internet.
+>
+> What it does **not** buy you: any authentication or authorisation guarantee.
+> Treat it as a shared quota token, not a credential. If you need real
+> identity — per-user data, private resume uploads, anything you would be
+> uncomfortable seeing in a public JS bundle — that needs session auth, which
+> this stack does not have. See AUDIT A11.
+>
+> If you would rather not ship the key at all, set `API_KEY=` empty in `.env`
+> and the frontend stops sending it; the backend's `require_api_key` becomes a
+> no-op and everything is open. That is a valid choice for a public read-only
+> deployment, and it is the honest one.
 
 ### Process model
 

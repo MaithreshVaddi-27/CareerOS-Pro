@@ -18,10 +18,10 @@ silently degrades quality · **P2** correctness-adjacent or maintenance debt.
 
 | | Count |
 |---|---|
-| Fixed | 15 (12 previous + 3 below) |
+| Fixed | 17 (16 previous + A14 below) |
 | P0 open | 0 |
-| P1 open | 3 |
-| P2 open | 7 |
+| P1 open | 4 |
+| P2 open | 6 |
 
 **Verdict.** The schema is now migration-owned and drift-guarded, rate limiting is
 correct across workers when `REDIS_URL` is set, and a lost checkpointer is visible on
@@ -330,6 +330,72 @@ the environment is fully populated.
 
 ---
 
+### A13 — `API_KEY` ships in the browser bundle and is not a secret · P1
+
+**Added in the Phase 3 deployment re-audit. Not fixed — needs a decision.**
+
+**Verified.** `docker-compose.yml` passes `VITE_API_KEY` to the frontend as a build
+arg, and `frontend/Dockerfile` sets it as an `ENV` before `npm run build`. Vite
+inlines every `VITE_*` variable into the bundle at build time. Confirmed
+empirically rather than assumed: building with
+`VITE_API_KEY=SUPERSECRET_PROBE_KEY` produces a `dist/assets/*.js` containing that
+exact literal string.
+
+**Impact.** This is the highest-severity finding of the re-audit, and a
+documentation defect as much as a design one. The production checklist said
+"`API_KEY` is long, random, and **rotated out of band**", which tells an operator
+it is a credential. It is not. Anyone can read it from view-source, and the API
+is callable directly without a browser at all. `ALLOWED_ORIGINS` and CORS do not
+help — they constrain browsers, not `curl`. Anything the key protects is
+currently protected by obscurity.
+
+Every `/jobs/*` route and `/agents/health` is affected. Nothing user-specific is
+stored yet, so the blast radius today is quota abuse and enumeration rather than
+data exposure — but the checklist wording would lead someone to expose real data
+under a false belief that the key guards it.
+
+**Decision needed.** Making the key a real credential is a design change. Three
+honest options:
+
+1. **Accept it as a quota token.** Document it as such and rely on rate limiting,
+   `ALLOWED_ORIGINS` and TLS. Correct for a public read-only deployment; must not
+   gate anything sensitive.
+2. **Terminate auth at the proxy.** OIDC or basic auth in nginx/Caddy in front of
+   the API, so the key never reaches the app. Best value today, no app edits.
+3. **Session auth in the app.** Real per-user identity. Largest change, and the
+   right answer once resume uploads (A10) or any per-user data lands.
+
+Not silently changed here — picking a security model is the owner's call. The
+misleading checklist line is corrected either way.
+
+---
+
+### A14 — Documented in-container migration step cannot run · P2
+
+**Added in the Phase 3 deployment re-audit. Fixed.**
+
+**Verified.** The `Dockerfile` copied `requirements.txt` and `backend/` only — never
+`alembic.ini` nor the `alembic/` directory. Yet `docs/DEPLOYMENT.md` and the
+production checklist both tell operators to run
+`docker compose exec backend alembic upgrade head`. Reproduced the exact failure
+by reconstructing the pre-fix image layout in a temp dir:
+
+```
+FAILED: No 'script_location' key found in configuration.
+```
+
+**Impact.** A fresh `docker compose up --build` against a new volume leaves the
+schema uncreated while the docs report success. The container `HEALTHCHECK` does
+catch it — `/health/ready` returns 503 — so it fails loudly, but the one
+documented remediation command is exactly what cannot fix it. Visible symptom,
+unhelpful instruction: the worst combination.
+
+**Fix.** Copy `alembic.ini` and `alembic/` into the image. Verified by replaying
+the post-fix file set in isolation: both migrations run, and `jobs` +
+`alembic_version` are created.
+
+---
+
 ## Degradation behaviour
 
 What the system does when a dependency fails. **All rows below were verified by
@@ -408,6 +474,7 @@ build.
 | 9 | ~~Tests for the remaining untested routes and graph nodes~~ | A8 | **DONE** |
 | 10 | ~~robots.txt compliance in the scraper~~ | A6 | **DONE** |
 | 11 | Resume endpoint for the human-review interrupt | A10 | S |
+| 11b | **Decide the `API_KEY` security model** (quota token / proxy auth / sessions) | A13 | S–L |
 
 ### Phase 4 — Hardening
 
