@@ -315,13 +315,21 @@ def test_verify_marks_a_confirmed_posting(client, session, monkeypatch):
 
 
 def test_verify_deactivates_a_closed_posting(client, session, monkeypatch):
-    """A posting confirmed closed must stop being served."""
+    """A posting confirmed closed must stop being served.
+
+    Driven by the structured `posting_closed` flag, not by the reason text — the
+    old implementation substring-matched "closed" in `reason`, which meant any
+    reworded message silently stopped deactivating, and any Firecrawl
+    mis-detection permanently removed a live posting via retention.
+    """
     job = session.query(Job).filter(Job.is_active.is_(True)).first()
 
     async def _closed(apply_url, title, company):
         from backend.services.sourcing.verification import VerificationResult
 
-        return VerificationResult(verified=False, reason="posting closed", evidence=None)
+        return VerificationResult(
+            verified=False, reason="posting closed", posting_closed=True
+        )
 
     monkeypatch.setattr(
         "backend.services.sourcing.verification.verify_job_posting", _closed

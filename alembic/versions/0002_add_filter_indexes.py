@@ -1,6 +1,6 @@
 """add filter indexes
 
-Phase 2 / AUDIT A4. The read paths filter on is_active, source,
+The read paths filter on is_active, source,
 employment_type, experience_level, remote and salary_max, and order by
 posted_at, but none of those columns were indexed, so /jobs/search and
 /jobs/match were full scans.

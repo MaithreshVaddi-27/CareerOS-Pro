@@ -8,10 +8,24 @@ from backend.schemas import NormalizedJob
 
 
 def find_duplicate(db: Session, job: NormalizedJob) -> Job | None:
-    existing = db.execute(select(Job).where(Job.url_hash == job.url_hash)).scalar_one_or_none()
+    """First existing row that matches, by url_hash then content_hash.
+
+    `.first()`, not `scalar_one_or_none()`: content_hash is indexed but NOT
+    unique, and two rows can legitimately share one — two different apply_urls
+    that normalise to the same title/company/location, inserted by two
+    concurrent searches that both missed. `scalar_one_or_none()` then raises
+    MultipleResultsFound, and since the duplicate rows are permanent, every
+    later search touching that hash 500s forever. `url_hash` IS unique, but
+    using the same lookup shape for both keeps this honest.
+    """
+    existing = db.execute(
+        select(Job).where(Job.url_hash == job.url_hash).limit(1)
+    ).scalars().first()
     if existing:
         return existing
-    existing = db.execute(select(Job).where(Job.content_hash == job.content_hash)).scalar_one_or_none()
+    existing = db.execute(
+        select(Job).where(Job.content_hash == job.content_hash).limit(1)
+    ).scalars().first()
     return existing
 
 

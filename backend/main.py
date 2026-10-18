@@ -1,10 +1,12 @@
 """FastAPI entrypoint. Phase 1 vertical slice: API -> normalize -> dedup -> MySQL -> filter."""
 
 import contextlib
+import hashlib
+import json
 import logging
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -37,16 +39,28 @@ async def lifespan(app: FastAPI):
     # run `alembic upgrade head` as a deploy step. Startup DDL (create_all +
     # a widen-VARCHAR patch) was what let environments drift apart silently.
     yield  # Application runs here
-    # Shutdown: close reusable HTTP clients
+    # Shutdown: close reusable HTTP clients, and the checkpointer's context
+    # manager. The saver was stored in graph._checkpointer_singleton["cm"] and
+    # never exited, so every shutdown leaked its connection pool.
+    from backend.graph import _checkpointer_singleton
     from backend.services.sourcing.job_api_adapter import _http_client
     from backend.services.sourcing.verification import _firecrawl_client
     from backend.services.sourcing.verification import _http_client as _verify_client
+
     for client in (_http_client, _verify_client, _firecrawl_client):
         if client is not None:
             await client.aclose()
 
+    cm = _checkpointer_singleton.pop("cm", None)
+    if cm is not None:
+        try:
+            await cm.__aexit__(None, None, None)
+        except Exception:  # pragma: no cover - best-effort teardown
+            logger.warning("checkpointer shutdown failed", exc_info=True)
+    _checkpointer_singleton.clear()
 
-app = FastAPI(title="CareerOS", version="0.2.0", lifespan=lifespan)
+
+app = FastAPI(title="CareerOS", version="1.0.0", lifespan=lifespan)
 
 # CORS middleware - allow frontend origins
 app.add_middleware(
@@ -74,8 +88,6 @@ def health():
     try:
         db_gen = get_db()
         db = next(db_gen)
-        # Test basic query
-        from sqlalchemy import text
         _ = db.execute(text("SELECT 1")).all()
         health_status["checks"]["database"] = {"status": "ok", "detail": "MySQL connection successful"}
         db.close()
@@ -139,8 +151,6 @@ def health():
 @app.get("/health/ready")
 def readiness():
     """Readiness probe - returns 200 if the app can serve requests, 503 otherwise."""
-    from fastapi import HTTPException
-
     # Quick database check
     try:
         db_gen = get_db()
@@ -203,10 +213,23 @@ async def search_jobs(req: SearchRequest, db: Session = Depends(get_db)):
 def get_job(job_id: str, db: Session = Depends(get_db)):
     job = db.get(Job, job_id)
     if not job:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail="job not found")
     return job
+
+
+def _match_thread_id(req: MatchRequest) -> str:
+    """Stable checkpoint thread id for a match request.
+
+    This was `f"match-{id(req)}"` — id() of a Pydantic model is its memory
+    address, so every request got a brand-new thread. With the MySQL checkpointer
+    that writes checkpoint rows, /jobs/match grew the checkpoint table without
+    bound in production, and an identical query never reused its prior state.
+
+    A hash of the meaningful fields does both jobs properly: same query reuses
+    the same thread, different query gets its own.
+    """
+    payload = json.dumps(req.model_dump(), sort_keys=True, default=str)
+    return f"match-{hashlib.sha256(payload.encode()).hexdigest()[:32]}"
 
 
 @app.post("/jobs/match", response_model=list[MatchedJobOut], dependencies=[Depends(require_api_key)])
@@ -217,13 +240,20 @@ async def match_jobs(req: MatchRequest, db: Session = Depends(get_db)):
     """
     from backend.graph import run_match_workflow
 
-    thread_id = f"match-{id(req)}"
+    thread_id = _match_thread_id(req)
     # Pass llm_provider and model_name to the workflow
     ranked = await run_match_workflow(db, req, thread_id, req.llm_provider, req.model_name)
 
+    # Batch-load the jobs the graph already fetched, instead of db.get() per
+    # ranked entry — this loop was an N+1 bounded only by top_k.
     out = []
+    ids = [entry["job_id"] for entry in ranked]
+    jobs_map = (
+        {j.id: j for j in db.execute(select(Job).where(Job.id.in_(ids))).scalars()}
+        if ids else {}
+    )
     for entry in ranked:
-        job = db.get(Job, entry["job_id"])
+        job = jobs_map.get(entry["job_id"])
         if not job:
             continue
         out.append(
@@ -245,9 +275,15 @@ async def match_jobs(req: MatchRequest, db: Session = Depends(get_db)):
 @app.post("/jobs/{job_id}/verify", response_model=JobOut, dependencies=[Depends(require_api_key)])
 async def verify_job(job_id: str, db: Session = Depends(get_db)):
     """Firecrawl-backed verification pass. Sets verified=True only on a positive
-    confirmed result — reachability alone is not enough (spec 2.3: never guess)."""
+    confirmed result — reachability alone is not enough (spec 2.3: never guess).
 
-    from fastapi import HTTPException
+    Deactivation is driven by `result.posting_closed`, a structured signal, not by
+    substring-matching the human-readable `reason`. This used to check for
+    "closed"/"filled" in the reason string, which meant a reworded message
+    silently stopped deactivating anything — and, worse, any Firecrawl
+    mis-detection on a live posting set is_active=False, after which retention
+    hard-deletes the row. Data loss reached by string matching.
+    """
 
     from backend.services.sourcing.verification import verify_job_posting
 
@@ -257,8 +293,9 @@ async def verify_job(job_id: str, db: Session = Depends(get_db)):
 
     result = await verify_job_posting(job.apply_url, job.title, job.company)
     job.verified = result.verified
-    job.verified_at = datetime.now(timezone.utc) if result.verified else job.verified_at
-    if not result.verified and ("closed" in result.reason.lower() or "filled" in result.reason.lower()):
+    if result.verified:
+        job.verified_at = datetime.now(timezone.utc)
+    if result.posting_closed:
         job.is_active = False
     db.commit()
     db.refresh(job)

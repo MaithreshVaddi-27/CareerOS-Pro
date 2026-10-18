@@ -12,6 +12,7 @@ definition and doesn't need to survive a restart.
 """
 
 import asyncio
+import logging
 from typing import TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -31,6 +32,7 @@ from backend.services.sourcing.job_api_adapter import get_adapter
 from backend.services.sourcing.normalize import normalize_job
 
 settings = get_settings()
+logger = logging.getLogger("careeros")
 _checkpointer_singleton: dict = {}
 
 # What the checkpointer actually resolved to, recorded so /health can report it
@@ -53,9 +55,14 @@ def checkpoint_status() -> dict:
 
 
 def _mysql_dsn() -> str:
-    # Use mysql+aiomysql:// scheme for AIOMySQLSaver compatibility
+    # mysql+aiomysql:// scheme for AIOMySQLSaver compatibility. The password is
+    # quoted: an unencoded '@' or ':' in it silently truncates the DSN and the
+    # saver connects to the wrong host — or nowhere. settings.resolved_database_url
+    # already does this for the main engine; this path had drifted.
+    from urllib.parse import quote_plus
+
     return (
-        f"mysql+aiomysql://{settings.mysql_user}:{settings.mysql_password}"
+        f"mysql+aiomysql://{settings.mysql_user}:{quote_plus(settings.mysql_password)}"
         f"@{settings.mysql_host}:{settings.mysql_port}/{settings.mysql_database}"
     )
 
@@ -129,11 +136,20 @@ async def _discover_normalize_dedup_filter(state: CareerOSState, db: Session) ->
     raw_postings = await adapter.search(req.query, req.location)
 
     for raw in raw_postings:
-        normalized = normalize_job(raw)
-        row, created = upsert_job(db, normalized)
-        if created:
-            client = get_client()
-            index_job(client, row.id, row.title, row.description, row.skills_required or [])
+        # Same isolation as /jobs/search: one malformed posting from one adapter
+        # must not fail the whole match. Without this a single bad row failed the
+        # node, and the request 500'd — the match path was stricter than search.
+        try:
+            normalized = normalize_job(raw)
+            row, created = upsert_job(db, normalized)
+            if created:
+                client = get_client()
+                index_job(client, row.id, row.title, row.description, row.skills_required or [])
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "skipping job source=%s source_id=%s (ingest failed)", raw.source, raw.source_id
+            )
 
     # Filter in SQL rather than loading every row: this used to be
     # `select(Job)` + a Python pass over the whole table (audit A4). The Python
@@ -159,7 +175,13 @@ async def _discover_normalize_dedup_filter(state: CareerOSState, db: Session) ->
 async def _retrieve_and_rerank(state: CareerOSState, db: Session) -> CareerOSState:
     req = MatchRequest(**state["request"])
     client = get_client()
-    semantic_hits = dict(semantic_search(client, req.query, limit=50))
+    # This limit used to be a hardcoded 50, which silently capped the semantic
+    # channel: a request with top_k > 50 could never surface more than 50
+    # semantic candidates no matter how many the DB channel fetched. Scale it
+    # with the same oversample the candidate pool uses, keeping 50 as the floor.
+    semantic_hits = dict(
+        semantic_search(client, req.query, limit=max(50, req.top_k * _CANDIDATE_OVERSAMPLE))
+    )
 
     # Batch fetch all jobs at once to avoid N+1 query problem
     # Only fetch active jobs to avoid loading inactive postings

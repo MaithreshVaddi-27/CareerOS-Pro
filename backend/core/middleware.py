@@ -12,6 +12,7 @@ Rate limiting is a fixed window per client IP. Two backends:
 """
 
 import logging
+import secrets
 import time
 import uuid
 from collections import defaultdict, deque
@@ -31,19 +32,20 @@ _RATE_LIMIT_WINDOW_SECONDS = 60
 
 # Created lazily on first use so importing this module never touches Redis.
 _redis = None
-_redis_unavailable = False
+# Set only when importing the client itself fails (bad REDIS_URL, missing redis
+# package) — that will not fix itself, so we stop retrying. A *connection*
+# failure is different: it is reported per request and retried, because a
+# transient outage must not permanently demote a multi-worker deploy to
+# per-process counters. The previous code set this on any exception and its
+# docstring claimed the opposite, so a single blip at startup silently left the
+# deploy running the exact multi-worker bug this backend exists to prevent.
+_redis_client_broken = False
 
 
 def _get_redis():
-    """Return a Redis client, or None if REDIS_URL is unset.
-
-    Falls back to None permanently after a connection failure: a limiter that
-    silently degrades to per-process counters mid-request would reintroduce the
-    exact multi-worker bug this backend exists to fix, so we keep trying but log
-    loudly on every attempt.
-    """
-    global _redis, _redis_unavailable
-    if _redis is None and settings.redis_url and not _redis_unavailable:
+    """Return a Redis client, or None if REDIS_URL is unset or unusable."""
+    global _redis, _redis_client_broken
+    if _redis is None and settings.redis_url and not _redis_client_broken:
         try:
             import redis.asyncio as aioredis
 
@@ -55,7 +57,7 @@ def _get_redis():
                 socket_timeout=2,
             )
         except Exception as exc:
-            _redis_unavailable = True
+            _redis_client_broken = True
             logger.error("REDIS_URL is set but redis client init failed (%s)", exc)
     return _redis
 
@@ -77,6 +79,15 @@ def _memory_limit(client_ip: str, store: dict, limit: int, window: int) -> bool:
     bucket = store[client_ip]
     while bucket and now - bucket[0] > window:
         bucket.popleft()
+    if not bucket:
+        # The window expired, so this client is under the limit either way. Drop
+        # the key and start a fresh deque: store is a defaultdict, so a client
+        # that stops sending would otherwise leave its deque in the dict forever
+        # and the dict would grow for the life of the process. Only an *empty*
+        # bucket is reclaimed — deleting a full one would hand an over-limit
+        # client a free reset on every rejected request.
+        store.pop(client_ip, None)
+        bucket = store[client_ip]
     if len(bucket) >= limit:
         return True
     bucket.append(now)
@@ -168,7 +179,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         )
 
     async def dispatch(self, request: Request, call_next):
-        if request.url.path == "/health":
+        # Both probes are exempt. /health/ready was not, which is the worst one to
+        # get wrong: the container HEALTHCHECK hits it every 30s, and an
+        # orchestrator polls it hardest exactly when the DB is down — so a
+        # rate-limited readiness probe answers 429 to the one caller that needs a
+        # truthful answer, and Docker marks the container unhealthy.
+        if request.url.path in ("/health", "/health/ready"):
             return await call_next(request)
         if self.limit <= 0:
             return await call_next(request)
@@ -214,5 +230,9 @@ async def require_api_key(request: Request):
                 "backend's API_KEY and restart the dev server."
             ),
         )
-    if provided != settings.api_key:
+    # Constant-time: a plain `!=` on a shared secret leaks its length and prefix
+    # through response timing. Compared as bytes because compare_digest() rejects
+    # non-ASCII str, and an API key with a non-ASCII character would otherwise
+    # turn every request into a 500 instead of a 401.
+    if not secrets.compare_digest(provided.encode(), settings.api_key.encode()):
         raise HTTPException(status_code=401, detail="invalid X-API-Key — value doesn't match backend API_KEY")

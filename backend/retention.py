@@ -1,4 +1,4 @@
-"""Bounded retention for inactive jobs (AUDIT A4 / item 6).
+"""Bounded retention for inactive jobs.
 
 When a posting disappears upstream it is flipped to ``is_active = false``
 rather than deleted, so the table only ever grows. This module prunes those

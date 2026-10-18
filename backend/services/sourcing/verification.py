@@ -40,6 +40,11 @@ def get_firecrawl_client() -> httpx.AsyncClient:
 class VerificationResult(BaseModel):
     verified: bool
     reason: str
+    # Whether the page positively states the posting is closed/filled. This is a
+    # structured signal, not something to re-derive by substring-matching `reason`
+    # — the caller uses it to deactivate the row, and `reason` is human-readable
+    # prose that gets reworded. See /jobs/{id}/verify.
+    posting_closed: bool = False
     page_title: str | None = None
     content_snippet: str | None = None
 
@@ -126,8 +131,8 @@ async def verify_job_posting(apply_url: str, expected_title: str, expected_compa
 
     if _looks_like_dead_posting(markdown):
         return VerificationResult(
-            verified=False, reason="posting appears closed/filled", page_title=page_title,
-            content_snippet=markdown[:280],
+            verified=False, reason="posting appears closed/filled", posting_closed=True,
+            page_title=page_title, content_snippet=markdown[:280],
         )
 
     low_md = markdown.lower()
