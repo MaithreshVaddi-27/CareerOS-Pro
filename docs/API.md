@@ -84,7 +84,7 @@ Authenticated. Per-agent call statistics from `core/monitoring.py`.
 ```jsonc
 {
   "agents": {
-    "llm:llama":       { "calls": 12, "successes": 12, "failures": 0,
+    "llm:gemini":      { "calls": 12, "successes": 12, "failures": 0,
                          "avg_latency_ms": 184.2, "failure_rate": 0.0, "status": "healthy" },
     "source:jsearch":  { "calls": 40, "successes": 38, "failures": 2,
                          "avg_latency_ms": 812.7, "failure_rate": 0.05, "status": "healthy" }
@@ -161,7 +161,7 @@ explanation.
 | `top_k` | int | `10` | Page size, `1`–`100`. Was unbounded before Phase 2. |
 | `offset` | int | `0` | Candidates to skip before ranking. |
 | `location`, `employment_type`, `experience_level`, `remote_only`, `min_salary`, `posted_within_days` | | `null`/`false` | Same semantics as `/jobs/search`. |
-| `llm_provider` | string | `null` | `auto` \| `llama` \| `gemini` \| `openrouter` \| `nvidia` \| `none` |
+| `llm_provider` | string | `null` | `auto` \| `gemini` \| `none` |
 | `model_name` | string | `null` | |
 
 **Response** — `MatchedJobOut[]`, sorted by `hybrid_score` descending.

@@ -15,18 +15,24 @@ Set `MYSQL_PASSWORD` and `API_KEY` in `.env` (see [CONFIGURATION.md](CONFIGURATI
 ## The loop
 
 ```bash
-ruff check backend/ tests/    # lint
-ruff check backend/ tests/ --fix   # autofix (imports, safe rewrites)
-python -m pytest -v                    # tests — includes `schema review`
-cd frontend && npm run build           # frontend has no test suite
+ruff check backend/ tests/            # backend lint
+ruff check backend/ tests/ --fix      # autofix (imports, safe rewrites)
+python -m pytest -v                   # backend suite
+cd frontend
+npx oxlint --deny correctness src/    # frontend lint
+npm run build                         # frontend has no test suite
 ```
 
 Schema changes are the one thing you cannot skip:
 
 ```bash
-schema migration (manual) -m "describe the change"   # then edit + review
-schema review          # exit 0 = models and migrations agree (also in CI)
+python -c "from backend.core.db import create_all; create_all()"   # apply new tables
 ```
+
+Use `create_all()`, never `Base.metadata.create_all(engine)` — the latter exits `0`
+and creates nothing, because `Base` has no models registered until they are imported.
+`create_all()` also only *creates*; widening an existing column needs a manual
+`ALTER` (see [DEPLOYMENT.md](DEPLOYMENT.md#troubleshooting)).
 
 ### Why the pin
 
@@ -95,7 +101,7 @@ A new job attribute needs the model column, the schema field, the parse in
 `normalize.py`, **and** a migration:
 
 ```bash
-schema migration (manual) -m "add seniority_band to jobs"
+python -c "from backend.core.db import create_all; create_all()"
 ```
 
 Review the generated file before committing — autogenerate catches structure, not
@@ -116,7 +122,7 @@ beyond `conftest.py`.
 | `test_job_adapter.py` | Adapter selection, mock/live mode, fan-out |
 | `test_match_prompt.py` | Prompt invariants and explain-node concurrency |
 | `test_middleware.py` | Rate limiting (both backends), API-key auth, response headers |
-| `test_migrations.py` | Migrations match the models; `.env.example` matches `Settings` |
+| `test_hardening.py` | Production invariants: SSRF guard, schema command, auth, redaction |
 | `test_checkpoint.py` | Checkpointer selection, degradation, `CHECKPOINT_STRICT` |
 | `test_verification.py` | Liveness checking |
 | `test_retention.py` | Dry-run default, bounded batches, never touches active rows |
@@ -169,11 +175,13 @@ The copies in test_dedup were weaker subsets of the same assertions.
 
 - [ ] `ruff check backend/ tests/` passes
 - [ ] `python -m pytest` passes
+- [ ] `npx oxlint --deny correctness src/` passes if you touched the frontend
 - [ ] `npm run build` passes if you touched the frontend
 - [ ] New behaviour has a test
 - [ ] Bug fixes have a test verified to fail without the fix
 - [ ] No secrets, `.env` values or API keys in the diff
 - [ ] New config vars documented in `.env.example` **and** [CONFIGURATION.md](CONFIGURATION.md)
+- [ ] New dependencies pinned exactly (`==`) and the suite still green
 - [ ] Commit message explains why
 
 ## Adding things
@@ -184,7 +192,7 @@ The copies in test_dedup were weaker subsets of the same assertions.
 | An ATS layout | Add the path to `COMPANY_CAREER_PAGE_PATTERNS` — no code change |
 | A hard filter | Add to `filters.py` and to `SearchRequest` |
 | An LLM provider | Implement `LLMProvider` in `model_router.py`, add to `_get_provider()` and the chain |
-| A table | Add to `models/`, re-export from `models/__init__.py`, then `schema migration (manual) -m "add X"` |
+| A table | Add to `models/`, re-export from `models/__init__.py`, then run `create_all()` |
 | A response field | Add to `schemas/job.py` — the OpenAPI schema follows automatically |
 
 ## Before you ship something significant

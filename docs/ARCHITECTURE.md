@@ -49,7 +49,7 @@ plain unit tests.
 backend/
 ├── core/                    cross-cutting; no job knowledge
 │   ├── config.py            Settings (pydantic-settings, lru_cache), single source of truth
-│   ├── db.py                engine, SessionLocal, Base (schema comes from Alembic)
+│   ├── db.py                engine, SessionLocal, Base, create_all()
 │   ├── middleware.py        request-id, security headers, rate limit, API-key gate
 │   └── monitoring.py        AgentMonitor: per-agent latency/failure stats
 ├── models/job.py            SQLAlchemy ORM — one table: jobs
@@ -115,9 +115,15 @@ Rules that hold everywhere:
 - `schemas/` and `models/` are leaves — they import only from `core/`.
 - Nothing imports from `tests/`.
 
-`backend/core/db.py` holds `Base` and the engine; `models/` import `Base` from it. The
-cycle (`db → models → db`) is broken by `alembic/env.py`, which imports `Base` and
-then every model module before autogenerate runs.
+`backend/core/db.py` holds `Base` and the engine; `models/` import `Base` from it.
+That gives a cycle (`db → models → db`), broken by importing `backend.models`
+*inside* `create_all()` rather than at module scope.
+
+This is why the function exists instead of a bare `Base.metadata.create_all(engine)`
+call at the import site: `Base` is an empty registry until a model module is
+imported, so anything that calls `create_all` without importing the models first
+creates **zero tables and exits 0**. `tests/test_hardening.py` runs the
+documented command in a clean subprocess to keep that failure from returning.
 
 ---
 
@@ -325,7 +331,7 @@ long-lived worker.
 | An ATS layout | Add the path to `COMPANY_CAREER_PAGE_PATTERNS`. No code change. |
 | A hard filter | Add to `filters.py` and to the `SearchRequest` schema. |
 | An LLM provider | Implement `LLMProvider` in `model_router.py`, add to `_get_provider()` and the fallback chain. |
-| A table | Add to `models/`, re-export from `models/__init__.py`, then `schema migration (manual) -m "add X"`. |
+| A table | Add to `models/`, re-export from `models/__init__.py`. `create_all()` creates it; an existing environment also needs a reviewed `CREATE TABLE`. |
 | A response field | Add to `schemas/job.py`. It propagates to the OpenAPI schema automatically. |
 
 ---
@@ -337,9 +343,11 @@ long-lived worker.
   `get_settings.cache_clear()` to change configuration mid-session.
 - **`main.py` imports routes' dependencies inside the handler.** Deliberate: it keeps
   `import backend.main` cheap and avoids import cycles between the app and the graph.
-- **Alembic owns the schema.** The app runs no DDL at startup. Run
-  `python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"` as a deploy step; `schema review` fails CI if the models and
-  the revisions drift.
+- **No DDL at startup.** The lifespan creates no tables, so an environment cannot
+  drift silently. Run
+  `python -c "from backend.core.db import create_all; create_all()"` as a deploy step.
+  It only *creates* missing tables — widening an existing column is a manual
+  reviewed `ALTER`.
 - **`_CompanyScraperAdapter` is defined after `get_adapter()` references it.** Fine —
   the name resolves at call time.
 - **MySQL only.** `resolved_database_url` raises rather than falling back. A silent

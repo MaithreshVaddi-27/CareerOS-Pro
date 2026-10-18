@@ -44,16 +44,25 @@ API_KEY=choose-a-long-random-string
 python -m venv backend/venv
 source backend/venv/bin/activate
 pip install -r requirements.txt
-python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"          # create the schema
+python -c "from backend.core.db import create_all; create_all()"          # create the schema
 python run.py
 ```
 
 `run.py` loads `.env` from the project root, fixes `sys.path`, and starts uvicorn on
 `127.0.0.1:8000`.
 
-> **The app does not create tables.** Schema is owned by Alembic. Run
-> `python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"` after cloning, and again after pulling any change that adds a
-> revision. Skipping it means the first query fails on a missing `jobs` table.
+> **The app does not create tables at startup** — no DDL runs in the lifespan, so
+> environments cannot drift silently. Run
+> `python -c "from backend.core.db import create_all; create_all()"` after cloning and
+> again after any change that adds or widens a column. Skipping it means the first
+> query fails on a missing table.
+>
+> Always use `create_all()`. The older
+> `from backend.core.db import Base, engine; Base.metadata.create_all(engine)` form
+> **exits 0 and creates nothing**: `Base` alone has an empty metadata registry,
+> because model modules register themselves when imported. `create_all()` does
+> that import first. `tests/test_hardening.py` pins this — the old form was a
+> deploy that looked successful and had no schema.
 
 Optional flags:
 
@@ -82,13 +91,13 @@ docker run -d --name careeros-mysql \
 Or point `MYSQL_HOST` at an existing instance. Then create the schema:
 
 ```bash
-python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"
+python -c "from backend.core.db import create_all; create_all()"
 ```
 
-Before pulling a change that adds a migration, run it as part of your deploy:
+Fold it into the restart so the app never serves against an old schema:
 
 ```bash
-python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)" && python run.py
+python -c "from backend.core.db import create_all; create_all()" && python run.py
 ```
 
 ### 4. Frontend
@@ -109,7 +118,7 @@ Runs MySQL, the backend and the frontend together.
 ```bash
 cp .env.example .env      # edit MYSQL_PASSWORD + API_KEY
 docker compose up --build
-docker compose exec backend python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"
+docker compose exec backend python -c "from backend.core.db import create_all; create_all()"
 ```
 
 Redis for shared rate-limit counters is behind a profile, so it stays optional:
@@ -138,7 +147,7 @@ The compose file builds from the repo-root `Dockerfile` for the backend and
 
 ### Checklist
 
-- [ ] `python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"` run against the deployed database
+- [ ] `python -c "from backend.core.db import create_all; create_all()"` run against the deployed database
 - [ ] `APP_ENV=production` — enables durable MySQL checkpoints
 - [ ] `CHECKPOINT_STRICT=true` — fail fast rather than lose checkpoints silently
 - [ ] `REDIS_URL` set **if** running more than one worker
@@ -278,15 +287,16 @@ root and that both are set. `run.py` reads `.env` before importing `config`, but
 `python -m backend.cli` does not — export the variables or use `python run.py`.
 
 **`Data too long for column 'source_id'`**
-The table predates a widened model column. Run the revision that widens it:
+The live table predates a widened model column. `create_all()` creates missing
+tables but does **not** alter existing ones, so this needs a manual `ALTER`:
 
-```bash
-python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"
+```sql
+ALTER TABLE jobs MODIFY source_id VARCHAR(512);
 ```
 
-If no such revision exists, the model and migrations have drifted — `schema review`
-will say so. Generate one with
-`schema migration (manual) -m "widen source_id to 512"`, review it, and commit.
+Check the current model length in `backend/models/job.py` and match it. There is
+no migration tool in this project — schema changes are a model edit plus a
+reviewed SQL statement applied to each environment.
 
 **Checkpoints not surviving restarts**
 Either `APP_ENV=development` (in-memory by design), or MySQL 9.x. Check `/health` —

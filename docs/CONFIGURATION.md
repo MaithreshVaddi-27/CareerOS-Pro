@@ -116,19 +116,17 @@ skipped — the free sources still work, so this is rarely fatal.
 
 ## LLM providers
 
-The router falls back in this order: **llama.cpp → NVIDIA → OpenRouter → Gemini**. It
-moves on when a provider errors *or* returns `confidence < 0.6`.
+**Gemini is the only LLM provider.** The llama.cpp, NVIDIA NIM, and OpenRouter
+integrations were removed — their settings and packages are gone, not deprecated.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `LLM_PROVIDER_MODE` | `auto` | `auto` walks the fallback chain. Any provider name pins that provider with no fallback. |
-| `LLAMA_CPP_BASE_URL` | *(empty)* | Local llama.cpp server. Unset disables it. Short 5s timeout — fails fast when the server is not running. |
-| `NVIDIA_API_KEY` | *(empty)* | NVIDIA NIM. |
-| `NVIDIA_MODEL` | `meta/llama-3.1-70b-instruct` | |
-| `OPENROUTER_API_KEY` | *(empty)* | |
-| `OPENROUTER_MODEL` | `anthropic/claude-3.5-sonnet` | |
-| `GEMINI_API_KEY` | *(empty)* | |
+| `LLM_PROVIDER_MODE` | `auto` | `auto` uses Gemini when `GEMINI_API_KEY` is set. `gemini` requires it. `none` disables LLM explanations. |
+| `GEMINI_API_KEY` | *(empty)* | From https://aistudio.google.com/app/apikey. |
 | `GEMINI_MODEL` | `gemini-flash-latest` | Rolling alias, not a pinned version — Google retires dated model IDs on a rolling schedule, so a pinned string eventually 404s. |
+
+No fallback chain remains. If the Gemini call fails, the explanation is omitted and
+the failure is logged rather than silently swallowed.
 
 With no provider configured the pipeline still runs; explanations come back empty with
 `confidence: 0.0`. See [API.md](API.md#behaviour-without-any-llm-configured).
@@ -242,16 +240,15 @@ configuration must call `get_settings.cache_clear()`.
 commas. `pydantic-settings` only parses JSON for real container types, so typing one
 as `list[str]` would require `["a","b"]` in `.env` and silently break the common case.
 
-**Changing a `String(n)` length.** Schema is owned by Alembic. Change the model, then
-generate and review a revision:
+**Changing a `String(n)` length.** There is no migration tool. Change the model in
+`backend/models/job.py`, then apply the matching statement to each environment:
 
-```bash
-schema migration (manual) -m "widen source_id to 512"
-python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"
+```sql
+ALTER TABLE jobs MODIFY source_id VARCHAR(512);
 ```
 
-`schema review` exits non-zero if the models and the migrations have drifted; it also
-runs in CI. Never edit a revision that has been applied anywhere — add a new one.
+`create_all()` creates missing tables but will not alter existing ones, so a live
+database needs this by hand. See [DEPLOYMENT.md](DEPLOYMENT.md#troubleshooting).
 
 ---
 
@@ -266,6 +263,6 @@ runs in CI. Never edit a revision that has been applied anywhere — add a new o
 - [ ] `.env` is not committed — it is gitignored (`.env.*` is ignored, so
       `.env.production` and `.env.staging` are covered too; `.env.example` is not)
 - [ ] `COMPANY_SCRAPER_USER_AGENT` identifies you with a contact URL
-- [ ] `python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"` has been run against the deployed database
+- [ ] `python -c "from backend.core.db import create_all; create_all()"` has been run against the deployed database
 - [ ] A recurring `python -m backend.retention --days N --yes` job is scheduled, so
       `is_active = false` rows do not accumulate without bound

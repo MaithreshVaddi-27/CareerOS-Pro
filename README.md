@@ -83,8 +83,8 @@ CareerOS is built the other way around:
         └──────────┬───────────┘
                    ▼
         ┌──────────────────────┐
-        │    model_router.py   │   grounded explanation, provider fallback
-        │                      │   llama → NVIDIA → OpenRouter → Gemini
+│    model_router.py   │   grounded explanation via Gemini
+         │                      │   (the only LLM provider)
         └──────────┬───────────┘
                    ▼
         ┌──────────────────────┐
@@ -145,7 +145,7 @@ docker run -d --name careeros-mysql \
   -e MYSQL_PASSWORD=your-password \
   -p 3306:3306 mysql:8
 
-python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"  # create the schema
+python -c "from backend.core.db import create_all; create_all()"  # create the schema
 python run.py                            # → http://127.0.0.1:8000
 ```
 
@@ -169,7 +169,7 @@ Set `VITE_API_BASE=http://127.0.0.1:8000` in `frontend/.env`.
 ```bash
 cp .env.example .env                     # then edit MYSQL_PASSWORD + API_KEY
 docker compose up --build
-docker compose exec backend python -c "from backend.core.db import Base, engine; Base.metadata.create_all(engine)"
+docker compose exec backend python -c "from backend.core.db import create_all; create_all()"
 ```
 
 Add `--profile ratelimit` to also start Redis for shared rate-limit counters (then set
@@ -287,7 +287,7 @@ unchanged, so an empty page just means you paged past the end.
   "candidate_skills": ["Python", "FastAPI", "PostgreSQL"],
   "top_k": 10,                 // page size, 1..100
   "offset": 0,                 // default 0
-  "llm_provider": "auto"       // auto | llama | gemini | openrouter | nvidia | none
+  "llm_provider": "auto"       // auto | gemini | none
 }
 // → [ MatchedJobOut, … ]
 ```
@@ -320,7 +320,7 @@ Full reference with error shapes: **[docs/API.md](docs/API.md)**.
 backend/
 ├── core/            cross-cutting concerns
 │   ├── config.py    env-driven Settings, lru_cached
-│   ├── db.py        engine, SessionLocal, Base (schema comes from Alembic)
+│   ├── db.py        engine, SessionLocal, Base, create_all()
 │   ├── middleware.py  request-id, security headers, rate limit, API-key auth
 │   └── monitoring.py  AgentMonitor — per-agent latency/failure stats
 ├── models/          SQLAlchemy ORM (Job)
@@ -383,18 +383,13 @@ and performs no network I/O.
 
 ## The LLM layer
 
-The router tries providers in a fixed, deterministic order and moves on when one
-errors **or** returns low confidence:
+**Gemini is the only LLM provider.** The llama.cpp, NVIDIA NIM, and OpenRouter
+integrations have been removed — their settings and packages are gone. Set
+`GEMINI_API_KEY` and explanations work; leave it unset and the pipeline still
+runs, returning `confidence: 0.0` with no explanation. You can pin the provider per
+request with `llm_provider`, or globally with `LLM_PROVIDER_MODE`.
 
-```
-llama.cpp (local, private) → NVIDIA NIM → OpenRouter → Gemini
-```
-
-You can pin a single provider per request with `llm_provider`, or globally with
-`LLM_PROVIDER_MODE`.
-
-**The prompt.** `backend/services/matching/model_router.py` builds one prompt per job, reused
-across every provider attempt so routing cannot change what is being asked:
+**The prompt.** `backend/services/matching/model_router.py` builds one prompt per job:
 
 - **CRAFT structure** — Role / Context / Action / Format / Tone. The Role and the
   grounding contract exist to suppress the one failure that matters: inventing skills.
