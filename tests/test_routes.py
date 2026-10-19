@@ -172,7 +172,9 @@ def test_get_job_returns_the_row(client, session):
 def test_get_job_unknown_id_is_404_with_detail(client):
     r = client.get("/jobs/does-not-exist", headers=AUTH)
     assert r.status_code == 404
-    assert r.json()["detail"] == "job not found"
+    body = r.json()
+    assert body["error"] == "not_found"
+    assert "couldn't find a role" in body["detail"].lower()
 
 
 # --------------------------------------------------------------------------

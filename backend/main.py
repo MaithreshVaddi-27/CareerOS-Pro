@@ -8,8 +8,10 @@ import logging
 import re
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
@@ -106,6 +108,53 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="CareerOS", version="1.0.0", lifespan=lifespan)
+
+
+# Human, professional error surface. Users never see raw stack traces or
+# internal details; every failure answers with a clear, actionable message.
+@app.exception_handler(RequestValidationError)
+async def _validation_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", "unknown")
+    logger.warning("request_id=%s validation_error path=%s", request_id, request.url.path)
+    problems = []
+    for err in exc.errors():
+        loc = " -> ".join(str(p) for p in err.get("loc", []) if p not in ("body", "query", "path"))
+        msg = err.get("msg", "invalid value")
+        problems.append(f"{loc}: {msg}" if loc else msg)
+    detail = " ".join(problems) if problems else "The request could not be understood."
+    return JSONResponse(
+        status_code=422,
+        content={"error": "invalid_request", "detail": detail, "request_id": request_id},
+    )
+
+
+@app.exception_handler(HTTPException)
+async def _http_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", "unknown")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": {400: "bad_request", 401: "unauthorized", 403: "forbidden", 404: "not_found", 409: "conflict", 422: "invalid_request", 429: "rate_limited", 503: "service_unavailable"}.get(
+                exc.status_code, "error"
+            ),
+            "detail": exc.detail,
+            "request_id": request_id,
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def _unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", "unknown")
+    logger.exception("request_id=%s unhandled_error path=%s", request_id, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "internal_error",
+            "detail": "Something went wrong on our end. Please try again, and contact support if it keeps happening.",
+            "request_id": request_id,
+        },
+    )
 
 # CORS middleware - allow frontend origins
 app.add_middleware(
@@ -327,7 +376,10 @@ async def search_jobs(req: SearchRequest, db: Session = Depends(get_db)):
 def get_job(job_id: str, db: Session = Depends(get_db)):
     job = db.get(Job, job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="job not found")
+        raise HTTPException(
+            status_code=404,
+            detail=f"We couldn't find a role with ID {job_id}. It may have been removed or expire — try searching again.",
+        )
     return job
 
 
@@ -424,7 +476,10 @@ async def verify_job(job_id: str, db: Session = Depends(get_db)):
 
     loaded = await asyncio.to_thread(_load)
     if loaded is None:
-        raise HTTPException(status_code=404, detail="job not found")
+        raise HTTPException(
+            status_code=404,
+            detail=f"We couldn't find a role with ID {job_id} to verify. It may have been removed — try searching again.",
+        )
     apply_url, title, company = loaded
 
     result = await verify_job_posting(apply_url, title, company)
@@ -436,7 +491,10 @@ async def verify_job(job_id: str, db: Session = Depends(get_db)):
         # line raised AttributeError — a 500 for what is really a 404.
         job = db.get(Job, job_id)
         if job is None:
-            raise HTTPException(status_code=404, detail="job not found")
+            raise HTTPException(
+                status_code=404,
+                detail=f"We couldn't find a role with ID {job_id} to save your changes. It may have been removed — try searching again.",
+            )
         job.verified = result.verified
         if result.verified:
             job.verified_at = datetime.now(timezone.utc)
