@@ -493,4 +493,6 @@ displace "posted within N days" by an hour.
 
 ## License
 
-[MIT](LICENSE) © CareerOS contributors.
+[MIT](LICENSE) © CareerOS contributors.## Status
+
+All phases 1-4 shipped. Lint/test/build green. See docs/PHASES.md.
