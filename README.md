@@ -2,7 +2,9 @@
 
 # CareerOS
 
-**A self-hosted job-intelligence platform: aggregate postings from many sources, hard-filter them deterministically, rank them by hybrid keyword + semantic score, and explain every match with auditable LLM evidence.**
+**A self-hosted job-intelligence platform.** Aggregate postings from many sources, filter
+them with deterministic rules, rank them with a hybrid keyword + semantic score, and explain
+every match with auditable LLM evidence.
 
 [![CI](https://github.com/MaithreshVaddi-27/CareerOS-Pro/actions/workflows/ci.yml/badge.svg)](https://github.com/MaithreshVaddi-27/CareerOS-Pro/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -34,17 +36,20 @@
 
 ## Why it exists
 
-Most job-search tooling makes you trust a black box: it hands you a ranked list and you
-cannot tell *why* anything is on it, or whether the "skills" it matched are actually in the
-job description.
+Most job-search tooling asks you to trust a black box: it hands you a ranked list and you
+cannot tell *why* anything is on it, or whether the skills it matched actually appear in the
+posting.
 
-CareerOS is built the other way around:
+CareerOS is built the other way around. Deterministic rules decide what you are eligible for.
+The LLM is only ever asked to explain a match that the rules already approved, and every
+explanation carries the quoted evidence it rests on. If a field could not be read from the
+source, it stays `unknown` — nothing is guessed to fill a gap.
 
 | Principle | How it is enforced in code |
 |---|---|
-| **Deterministic where it matters** | Filtering, normalization, dedup and ranking are pure Python. No LLM decides what you are eligible for. |
-| **Never invent data** | A field that cannot be read from the source stays `unknown`. Nothing is guessed to fill a gap. |
-| **Every match is auditable** | `/jobs/match` returns `evidence` — the skills quoted from the posting — alongside the model's conclusion. |
+| **Deterministic where it matters** | Filtering, normalization, dedup and ranking are pure Python. No LLM decides eligibility. |
+| **Never invent data** | Unreadable fields stay `unknown`. Nothing is fabricated to complete a record. |
+| **Every match is auditable** | `/jobs/match` returns `evidence` — skills quoted from the posting — alongside the conclusion. |
 | **Grounded generation** | The match prompt is CRAFT-structured with an explicit grounding pass and a "subset of candidate skills" constraint. |
 | **Local-first, credential-optional** | Runs with zero API keys in `mock` mode. Every integration degrades to "no results", never to a crash. |
 
@@ -83,8 +88,8 @@ CareerOS is built the other way around:
         └──────────┬───────────┘
                    ▼
         ┌──────────────────────┐
-│    model_router.py   │   grounded explanation via Gemini
-         │                      │   (the only LLM provider)
+        │    model_router.py   │   grounded explanation via Gemini
+        │                      │   (the only LLM provider)
         └──────────┬───────────┘
                    ▼
         ┌──────────────────────┐
@@ -94,8 +99,8 @@ CareerOS is built the other way around:
 ```
 
 The whole match path is a [LangGraph](https://langchain-ai.github.io/langgraph/) state
-machine (`backend/graph.py`). It is **linear and unconditional** — the LLM never overrides
-a hard filter, and the graph pauses for human review before anything is marked
+machine (`backend/graph.py`). It is **linear and unconditional** — the LLM never
+overrides a hard filter, and the graph pauses for human review before anything is marked
 ready-to-apply.
 
 ---
@@ -118,7 +123,7 @@ cd CareerOS-Pro
 cp .env.example .env
 ```
 
-Two values have **no defaults** and the app will refuse to start without them:
+Two values have **no defaults** and the app refuses to start without them:
 
 ```dotenv
 MYSQL_PASSWORD=your-password
@@ -127,8 +132,8 @@ API_KEY=choose-a-long-random-string
 
 > MySQL 8.x only. MySQL 9.x disallows MD5 in generated columns, which breaks the
 > LangGraph checkpoint tables. The app falls back to in-memory checkpoints and reports
-> it as `degraded` on `/health`; set `CHECKPOINT_STRICT=true` in production to make that
-> a refusal to start instead.
+> it as `degraded` on `/health`; set `CHECKPOINT_STRICT=true` in production to make
+> that a refusal to start instead.
 
 ### 2. Backend
 
@@ -349,7 +354,7 @@ backend/
 
 **The one rule that keeps this codebase navigable:** `main.py` and `graph.py` contain
 no business logic. `graph.py` in particular is pure orchestration — every node just
-calls a service function. If you find yourself writing a `if` about job data in
+calls a service function. If you find yourself writing an `if` about job data in
 `graph.py`, it belongs in `services/`.
 
 **The `services/` split is the second rule: `sourcing` versus `matching`.** If the
@@ -468,12 +473,13 @@ Workflow, conventions and the review checklist: **[docs/CONTRIBUTING.md](docs/CO
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every environment variable, defaults and interactions |
 | [docs/API.md](docs/API.md) | Endpoint reference, request/response shapes, error semantics |
 | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | Dev workflow, testing conventions, PR checklist |
+| [docs/PHASES.md](docs/PHASES.md) | Phase, bug, status, upgrade and degradation register |
 
 ---
 
 ## Project status
 
-Active development. Honest summary of where it stands:
+Active development. An honest summary of where things stand:
 
 **Working and tested** — multi-source aggregation, deterministic normalization and
 dedup, SQL-side hard filtering over indexed columns, bounded candidate retrieval,
@@ -493,6 +499,4 @@ displace "posted within N days" by an hour.
 
 ## License
 
-[MIT](LICENSE) © CareerOS contributors.## Status
-
-All phases 1-4 shipped. Lint/test/build green. See docs/PHASES.md.
+[MIT](LICENSE) © CareerOS contributors.
