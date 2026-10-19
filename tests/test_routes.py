@@ -404,3 +404,51 @@ def test_readiness_is_503_when_the_database_is_down(client, monkeypatch):
 def test_agents_health_returns_a_snapshot(client):
     body = client.get("/agents/health", headers=AUTH).json()
     assert isinstance(body, dict)
+
+
+def _count_jobs_selects(client, session, n_rows):
+    """Run one search over `n_rows` matching rows; return the jobs SELECTs it issued."""
+    for i in range(n_rows):
+        session.add(_job(id=f"probe{i:028d}", title=f"Probe Engineer {i}", posted_at=NOW))
+    session.commit()
+
+    seen = {"n": 0}
+
+    @sa.event.listens_for(session.get_bind(), "before_cursor_execute")
+    def _tally(conn, cursor, statement, params, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT") and "FROM jobs" in statement:
+            seen["n"] += 1
+
+    try:
+        r = client.post(
+            "/jobs/search",
+            json={"query": "", "location": "", "limit": 200},
+            headers=AUTH,
+        )
+        assert r.status_code == 200
+    finally:
+        sa.event.remove(session.get_bind(), "before_cursor_execute", _tally)
+        session.query(Job).filter(Job.id.like("probe%")).delete()
+        session.commit()
+    return seen["n"]
+
+
+def test_search_does_not_n_plus_one_on_serialization(client, session, no_adapters):
+    """A search must not re-SELECT every row it returns.
+
+    `Session.rollback()` expires every instance in the session, so serialising
+    ORM objects *after* the rollback costs one SELECT per row — an N+1 that runs
+    during response validation, on the event loop, after the handler returned.
+
+    Measured here before the fix: 22 / 62 / 200 rows cost 27 / 65 / 203
+    `SELECT ... FROM jobs`. After: 5 / 3 / 3 — flat in row count.
+
+    Asserted on the slope, not an exact count: the point is that adding rows must
+    not add queries. The ceiling is a backstop against a partial regression.
+    """
+    no_adapters()  # ingest nothing: this measures the read+serialise tail only
+    small = _count_jobs_selects(client, session, 10)
+    large = _count_jobs_selects(client, session, 70)
+
+    assert large <= small, f"jobs SELECTs grew with row count: {small} -> {large}"
+    assert large < 10, f"{large} jobs SELECTs for a flat read — N+1 is back"

@@ -1,5 +1,6 @@
 """FastAPI entrypoint. Phase 1 vertical slice: API -> normalize -> dedup -> MySQL -> filter."""
 
+import asyncio
 import contextlib
 import hashlib
 import json
@@ -251,13 +252,24 @@ def agents_health():
     return agent_monitor.snapshot()
 
 
-@app.post("/jobs/search", response_model=list[JobOut], dependencies=[Depends(require_api_key)])
-async def search_jobs(req: SearchRequest, db: Session = Depends(get_db)):
-    """Discover -> Normalize -> Dedup -> Filter. Ranking/matching/LLM layers are Phase 2+."""
-    adapter = get_adapter(req.sources)
-    raw_postings = await adapter.search(req.query, req.location)
-    logger.info("search fetched=%d query=%s", len(raw_postings), req.query)
+def _ingest_filter_and_select(db: Session, req: SearchRequest, raw_postings: list) -> list[JobOut]:
+    """The blocking half of POST /jobs/search. Runs in a worker thread, not on the loop.
 
+    Two things live here that used to be in the handler.
+
+    The N+1: rollback() expires every ORM instance in the session, so reading the
+    rows back afterwards re-SELECTs them one at a time. The handler returned
+    `filtered` and let FastAPI's response_model validation touch those attributes
+    — after the handler returned, on the event loop. Measured: 20 rows cost 20
+    extra round-trips. Serialising to JobOut while the rows are still loaded
+    removes them.
+
+    The event loop: this is ~1000 blocking round-trips for a 200-posting ingest
+    (SAVEPOINT + 2 SELECTs + INSERT + flush, per row, then a commit fsync). Inline
+    in an async def, that stalls every other in-flight request for the duration.
+    asyncio.to_thread moves the whole block off the loop without migrating the
+    data layer to async SQLAlchemy.
+    """
     for raw in raw_postings:
         try:
             # SAVEPOINT per posting: one bad row must not discard the other
@@ -287,10 +299,22 @@ async def search_jobs(req: SearchRequest, db: Session = Depends(get_db)):
     ).scalars().all()
 
     filtered = apply_hard_filters(candidate_jobs, req)
+    # Materialise BEFORE rollback — after it, every attribute access is a SELECT.
+    out = [JobOut.model_validate(job) for job in filtered]
     # Read-only tail: hand the pooled connection back before the response is
     # serialised. The ingest loop above already committed its own work.
     db.rollback()
-    return filtered
+    return out
+
+
+@app.post("/jobs/search", response_model=list[JobOut], dependencies=[Depends(require_api_key)])
+async def search_jobs(req: SearchRequest, db: Session = Depends(get_db)):
+    """Discover -> Normalize -> Dedup -> Filter. Ranking/matching/LLM layers are Phase 2+."""
+    adapter = get_adapter(req.sources)
+    raw_postings = await adapter.search(req.query, req.location)
+    logger.info("search fetched=%d query=%s", len(raw_postings), req.query)
+
+    return await asyncio.to_thread(_ingest_filter_and_select, db, req, raw_postings)
 
 
 @app.get("/jobs/{job_id}", response_model=JobOut, dependencies=[Depends(require_api_key)])
@@ -316,6 +340,20 @@ def _match_thread_id(req: MatchRequest) -> str:
     return f"match-{hashlib.sha256(payload.encode()).hexdigest()[:32]}"
 
 
+def _load_ranked_jobs(db: Session, ids: list[str]) -> dict[str, Job]:
+    """Batch-load ranked jobs and serialise them before the connection goes back.
+
+    Same rollback-expiry trap as /jobs/search: JobOut is built here, while the
+    rows are still loaded, so response validation never re-SELECTs.
+    """
+    if not ids:
+        return {}
+    jobs = db.execute(select(Job).where(Job.id.in_(ids))).scalars().all()
+    out = {j.id: JobOut.model_validate(j) for j in jobs}
+    db.rollback()
+    return out
+
+
 @app.post("/jobs/match", response_model=list[MatchedJobOut], dependencies=[Depends(require_api_key)])
 async def match_jobs(req: MatchRequest, db: Session = Depends(get_db)):
     """Full pipeline (spec section 4): discover -> normalize -> dedup -> filter
@@ -330,19 +368,18 @@ async def match_jobs(req: MatchRequest, db: Session = Depends(get_db)):
 
     # Batch-load the jobs the graph already fetched, instead of db.get() per
     # ranked entry — this loop was an N+1 bounded only by top_k.
-    out = []
+    # On a worker thread: the SELECT is blocking PyMySQL, not async.
     ids = [entry["job_id"] for entry in ranked]
-    jobs_map = (
-        {j.id: j for j in db.execute(select(Job).where(Job.id.in_(ids))).scalars()}
-        if ids else {}
-    )
+    jobs_map = await asyncio.to_thread(_load_ranked_jobs, db, ids)
+
+    out = []
     for entry in ranked:
         job = jobs_map.get(entry["job_id"])
         if not job:
             continue
         out.append(
             MatchedJobOut(
-                job=JobOut.model_validate(job),
+                job=job,
                 keyword_score=entry["keyword_score"],
                 semantic_score=entry["semantic_score"],
                 hybrid_score=entry["hybrid_score"],
@@ -371,16 +408,34 @@ async def verify_job(job_id: str, db: Session = Depends(get_db)):
 
     from backend.services.sourcing.verification import verify_job_posting
 
-    job = db.get(Job, job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="job not found")
+    # Read on a worker thread: db.get() is a blocking round-trip on PyMySQL.
+    # We take only the three scalar fields the verifier needs, so nothing holds a
+    # live ORM instance across the await below — the session used to stay open
+    # (holding a pooled connection) for the full duration of an outbound HTTP call.
+    def _load() -> tuple[str, str, str] | None:
+        job = db.get(Job, job_id)
+        return (job.apply_url, job.title, job.company) if job else None
 
-    result = await verify_job_posting(job.apply_url, job.title, job.company)
-    job.verified = result.verified
-    if result.verified:
-        job.verified_at = datetime.now(timezone.utc)
-    if result.posting_closed:
-        job.is_active = False
-    db.commit()
-    db.refresh(job)
-    return job
+    loaded = await asyncio.to_thread(_load)
+    if loaded is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    apply_url, title, company = loaded
+
+    result = await verify_job_posting(apply_url, title, company)
+
+    def _persist() -> JobOut:
+        job = db.get(Job, job_id)
+        job.verified = result.verified
+        if result.verified:
+            job.verified_at = datetime.now(timezone.utc)
+        if result.posting_closed:
+            job.is_active = False
+        db.commit()
+        db.refresh(job)
+        # Serialise before rollback for the same reason as /jobs/search: rollback
+        # expires the instance, and touching it afterwards costs a re-SELECT.
+        out = JobOut.model_validate(job)
+        db.rollback()
+        return out
+
+    return await asyncio.to_thread(_persist)
