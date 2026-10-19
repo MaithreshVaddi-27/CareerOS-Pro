@@ -3,7 +3,7 @@
 import datetime as dt
 from typing import Annotated, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 # Bounds for the two free-form list fields on the request schemas. A list with
 # no bound is an unbounded body: it reaches `Job.source.in_(req.sources)`, so
@@ -22,6 +22,16 @@ GeminiModelName = Annotated[
 # Ten is above every realistic configuration; the cap stops a caller from
 # sending thousands of strings to inflate the SQL and the checkpoint hash.
 _MAX_SOURCES = 10
+
+
+def _coerce_empty_to_none(data: dict) -> dict:
+    """Frontend may send empty strings "" for unset numeric filters. Treat them
+    as absent (None) instead of failing validation with a 422."""
+    if isinstance(data, dict):
+        for key in ("min_salary", "max_salary", "posted_within_days"):
+            if data.get(key) == "":
+                data[key] = None
+    return data
 
 
 class RawJobPosting(BaseModel):
@@ -107,6 +117,11 @@ class SearchRequest(BaseModel):
     limit: int = Field(default=50, ge=1, le=200)
     offset: int = Field(default=0, ge=0)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_empty_filters(cls, data):
+        return _coerce_empty_to_none(data)
+
 
 class MatchRequest(BaseModel):
     query: str = Field(max_length=200)
@@ -132,6 +147,11 @@ class MatchRequest(BaseModel):
     # Restored so the intent in graph.py is expressible, and so match can be
     # narrowed by source the same way search can.
     sources: Optional[list[SourceName]] = Field(default=None, max_length=_MAX_SOURCES)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_empty_filters(cls, data):
+        return _coerce_empty_to_none(data)
 
 
 class MatchedJobOut(BaseModel):
