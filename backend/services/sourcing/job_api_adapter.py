@@ -414,7 +414,15 @@ def get_adapter(sources: list[str] | None = None) -> JobSourceAdapter:
 
     configured: list[JobSourceAdapter] = []
     pool = {s.strip() for s in settings.job_sources.split(",") if s.strip()}
-    requested = pool if sources is None else ({s.strip() for s in sources if s.strip()} & pool)
+    # `company_scraper` is the stored row tag, not the adapter's enabling name.
+    # Accept both spellings here so fan-out agrees with the SQL/Python filters.
+    _source_aliases = {"company_scraper": "company"}
+    requested_sources = (
+        pool
+        if sources is None
+        else {_source_aliases.get(s.strip(), s.strip()) for s in sources if s.strip()}
+    )
+    requested = requested_sources & pool
 
     if "jsearch" in requested and settings.jsearch_api_key:
         configured.append(JSearchAdapter(settings.jsearch_api_key))
