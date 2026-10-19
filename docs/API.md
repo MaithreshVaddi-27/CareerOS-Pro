@@ -108,11 +108,23 @@ Authenticated. Fan out to every configured source, normalize, dedup, hard-filter
 | `employment_type` | string | `null` | `full_time` \| `part_time` \| `internship` \| `contract` \| `temporary` |
 | `experience_level` | string | `null` | `intern` \| `fresher` \| `entry` \| `mid` \| `senior` |
 | `remote_only` | bool | `false` | |
-| `min_salary` | float | `null` | |
-| `posted_within_days` | int | `null` | |
-| `sources` | string[] | `null` | Overrides `JOB_SOURCES` for this request. |
+| `min_salary` | float | `null` | Rows with an unknown salary are **not** excluded. |
+| `max_salary` | float | `null` | Ceiling on `salary_max`. Unknown salary is **not** excluded. |
+| `posted_within_days` | int | `null` | `1`–`3650`. A job with unknown `posted_at` is not excluded. |
+| `sources` | string[] | `null` | Overrides `JOB_SOURCES` for this request. At most 10 entries; each 1–64 chars. Accepts either the enabling name or the stored tag (see below). |
 | `limit` | int | `50` | Page size, `1`–`200`. |
 | `offset` | int | `0` | Rows to skip. |
+
+**`sources` accepts both names.** One source has two spellings: the name that
+enables it and the name rows are tagged with.
+
+| Enabling name (`JOB_SOURCES`) | Stored `Job.source` |
+|---|---|
+| `company` | `company_scraper` |
+
+Every other source uses the same string in both places. Either spelling now
+matches rows from the career-page scraper, so `sources: ["company"]` and
+`sources: ["company_scraper"]` are equivalent on this endpoint.
 
 **Response** — `JobOut[]`, ordered by `posted_at` descending (nulls last), then
 `created_at` descending. At most `limit` rows; no total count is returned, so an
@@ -160,9 +172,12 @@ explanation.
 | `candidate_skills` | string[] | `[]` | The model may only match from this list. |
 | `top_k` | int | `10` | Page size, `1`–`100`. Was unbounded before Phase 2. |
 | `offset` | int | `0` | Candidates to skip before ranking. |
-| `location`, `employment_type`, `experience_level`, `remote_only`, `min_salary`, `posted_within_days` | | `null`/`false` | Same semantics as `/jobs/search`. |
+| `location`, `employment_type`, `experience_level`, `remote_only`, `min_salary`, `max_salary`, `posted_within_days`, `sources` | | `null`/`false` | Same semantics as `/jobs/search`. |
 | `llm_provider` | string | `null` | `auto` \| `gemini` \| `none` |
-| `model_name` | string | `null` | |
+| `model_name` | string | `null` | Overrides `GEMINI_MODEL` for this request. Must be a bare model id (`[A-Za-z0-9._-]`, ≤64 chars); anything else is rejected with a 422. |
+
+`sources` narrows **both** the adapter fan-out and the stored-row filter on this
+endpoint, matching `/jobs/search`.
 
 **Response** — `MatchedJobOut[]`, sorted by `hybrid_score` descending.
 

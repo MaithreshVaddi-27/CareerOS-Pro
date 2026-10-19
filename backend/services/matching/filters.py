@@ -39,6 +39,36 @@ _LOCATION_ALIASES: dict[str, list[str]] = {
     "india": ["india", "bharat"],
 }
 
+# A source has two names: the one that *enables* it in JOB_SOURCES / the
+# adapter fan-out, and the one rows are *tagged* with in `Job.source`. For every
+# source but one they are the same string. The career-page scraper is enabled as
+# `company` but writes `company_scraper`.
+#
+# That asymmetry was a silent-wrong-answer bug: `sources: ["company"]` enabled
+# the scraper, the scraper fetched every posting it found, and then the row
+# filter ran `Job.source IN ('company')` — which matches nothing — so the
+# results were discarded and the caller saw a short list from the other sources
+# with no indication the scraper's work had been thrown away. The README
+# documented the stored name, which pushed callers further from the one that
+# appeared to work.
+#
+# Both spellings are now accepted and both expand to the stored name, so the
+# filter agrees with itself and with the adapter pool. Unknown names pass
+# through unchanged: an unrecognised source should match zero rows, not raise.
+_SOURCE_NAME_ALIASES: dict[str, list[str]] = {
+    "company": ["company_scraper"],
+}
+
+
+def _expand_sources(sources: list[str] | None) -> list[str] | None:
+    """Map caller-supplied source names onto every stored name they can match."""
+    if not sources:
+        return None
+    expanded = {s for s in sources}
+    for s in sources:
+        expanded.update(_SOURCE_NAME_ALIASES.get(s, []))
+    return sorted(expanded)
+
 
 def _like(column, needle: str) -> ColumnElement[bool]:
     """Case-insensitive substring match with LIKE wildcards escaped.
@@ -70,7 +100,7 @@ def build_sql_filters(
         clauses.append(Job.remote == "remote")
 
     if req.sources:
-        clauses.append(Job.source.in_(req.sources))
+        clauses.append(Job.source.in_(_expand_sources(req.sources)))
 
     if req.query:
         # Same rule as Python: a substring of the title or the description.
@@ -98,6 +128,11 @@ def build_sql_filters(
         # Unknown salary is not excluded (spec 2.3): unknown != ineligible.
         clauses.append(or_(Job.salary_max.is_(None), Job.salary_max >= req.min_salary))
 
+    if req.max_salary is not None:
+        # Same unknown-salary rule as the floor, pointed the other way: a row
+        # whose salary we could not parse is not evidence of being over budget.
+        clauses.append(or_(Job.salary_max.is_(None), Job.salary_max <= req.max_salary))
+
     if req.posted_within_days is not None:
         reference = now or datetime.now(timezone.utc)
         # posted_at is a naive DATETIME holding UTC, so compare against naive UTC.
@@ -108,7 +143,7 @@ def build_sql_filters(
     return clauses
 
 
-def passes_hard_filters(job: Job, req: SearchRequest) -> bool:
+def passes_hard_filters(job: Job, req: SearchRequest, now: datetime | None = None) -> bool:
     if not job.is_active:
         return False
 
@@ -123,7 +158,7 @@ def passes_hard_filters(job: Job, req: SearchRequest) -> bool:
     if req.remote_only and job.remote != "remote":
         return False
 
-    if req.sources and job.source not in req.sources:
+    if req.sources and job.source not in (_expand_sources(req.sources) or ()):
         # Previously only the SQL layer applied this, so the Python and SQL
         # implementations disagreed and the SQL prefilter could exclude a row
         # the authoritative predicate would have kept.
@@ -245,8 +280,21 @@ def passes_hard_filters(job: Job, req: SearchRequest) -> bool:
         if job.salary_max is not None and job.salary_max < req.min_salary:
             return False
 
+    if req.max_salary is not None:
+        # Mirror of the floor above: an unparseable salary is not evidence of
+        # being over budget, so it passes the ceiling too.
+        if job.salary_max is not None and job.salary_max > req.max_salary:
+            return False
+
     if req.posted_within_days is not None and job.posted_at is not None:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=req.posted_within_days)
+        # Uses the caller-supplied `now` so this row's cutoff is the SAME instant
+        # build_sql_filters used. It used to call datetime.now() per row, which
+        # meant the SQL pass ran against an earlier reference time and could
+        # therefore be *stricter* than this one — breaking the documented
+        # superset guarantee for a row sitting on the boundary, and costing a
+        # syscall per candidate.
+        reference = now or datetime.now(timezone.utc)
+        cutoff = reference - timedelta(days=req.posted_within_days)
         posted = job.posted_at if job.posted_at.tzinfo else job.posted_at.replace(tzinfo=timezone.utc)
         if posted < cutoff:
             return False
@@ -255,5 +303,5 @@ def passes_hard_filters(job: Job, req: SearchRequest) -> bool:
     return True
 
 
-def apply_hard_filters(jobs: list[Job], req: SearchRequest) -> list[Job]:
-    return [j for j in jobs if passes_hard_filters(j, req)]
+def apply_hard_filters(jobs: list[Job], req: SearchRequest, now: datetime | None = None) -> list[Job]:
+    return [j for j in jobs if passes_hard_filters(j, req, now)]

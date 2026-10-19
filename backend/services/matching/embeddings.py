@@ -24,8 +24,16 @@ class EmbeddingProvider(Protocol):
 _VECTOR_SIZE = 256
 
 
+@functools.lru_cache(maxsize=1)
 def _get_vectorizer() -> HashingVectorizer:
-    """Create and cache the HashingVectorizer instance."""
+    """Create and cache the HashingVectorizer instance.
+
+    The docstring always claimed this was cached and the code never cached it.
+    Construction runs sklearn's param validation and rebuilds the internal
+    feature hasher, so this happened once per embed() call — and embed() is
+    called per indexed job plus per explained job, i.e. hundreds of times on a
+    single /jobs/match request.
+    """
     return HashingVectorizer(
         n_features=_VECTOR_SIZE,
         alternate_sign=False,

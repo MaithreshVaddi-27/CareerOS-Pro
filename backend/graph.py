@@ -13,6 +13,7 @@ definition and doesn't need to survive a restart.
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -168,18 +169,23 @@ def _ingest_and_filter(state: CareerOSState, db: Session, req: MatchRequest, raw
     search_req = SearchRequest(
         query=req.query, location=req.location, employment_type=req.employment_type,
         experience_level=req.experience_level, remote_only=req.remote_only,
-        min_salary=req.min_salary, posted_within_days=req.posted_within_days,
+        min_salary=req.min_salary, max_salary=req.max_salary,
+        posted_within_days=req.posted_within_days, sources=req.sources,
     )
+    # One `now` shared by both filter passes — see the same note in
+    # main._ingest_filter_and_select. Separate instants let the SQL pass be
+    # stricter than the Python one, which breaks the superset contract.
+    now = datetime.now(timezone.utc)
     candidates = db.execute(
         select(Job)
-        .where(*build_sql_filters(search_req))
+        .where(*build_sql_filters(search_req, now=now))
         .order_by(
             Job.posted_at.is_(None), Job.posted_at.desc(), Job.created_at.desc(), Job.id.desc()
         )
         .offset(req.offset)
         .limit(req.top_k * _CANDIDATE_OVERSAMPLE)
     ).scalars().all()
-    filtered = apply_hard_filters(candidates, search_req)
+    filtered = apply_hard_filters(candidates, search_req, now=now)
     # Read ids out BEFORE the rollback — touching `j.id` after it would re-SELECT.
     state["candidate_ids"] = [j.id for j in filtered]
     # Release the pooled connection before the LLM fan-out. Without this the

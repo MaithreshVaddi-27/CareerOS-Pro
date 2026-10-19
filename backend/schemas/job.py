@@ -1,9 +1,27 @@
 """Pydantic v2 schemas. Unknown data stays 'unknown' — never invented (spec 2.3)."""
 
 import datetime as dt
-from typing import Optional
+from typing import Annotated, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+# Bounds for the two free-form list fields on the request schemas. A list with
+# no bound is an unbounded body: it reaches `Job.source.in_(req.sources)`, so
+# every element becomes a bind parameter in the WHERE clause.
+SourceName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
+
+# A Gemini model id. Constrained because it is interpolated into a request path
+# server-side; the same pattern is enforced in model_router as the trust
+# boundary. Kept permissive on the inside so fine-tune ids (tunedModels/...)
+# are not rejected by a client that has them but this process does not.
+GeminiModelName = Annotated[
+    str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}$")
+]
+
+# Job sources are a short closed set configured per deployment (JOB_SOURCES).
+# Ten is above every realistic configuration; the cap stops a caller from
+# sending thousands of strings to inflate the SQL and the checkpoint hash.
+_MAX_SOURCES = 10
 
 
 class RawJobPosting(BaseModel):
@@ -76,10 +94,13 @@ class SearchRequest(BaseModel):
     experience_level: Optional[str] = Field(default=None, max_length=50)
     remote_only: bool = False
     min_salary: Optional[float] = None
-    posted_within_days: Optional[int] = None
-    sources: Optional[list[str]] = None  # restrict results to these job sources (e.g. ["jsearch","company"])
-    llm_provider: Optional[str] = None  # "auto" | "gemini" | "none"
-    model_name: Optional[str] = None
+    max_salary: Optional[float] = Field(default=None, ge=0)
+    posted_within_days: Optional[int] = Field(default=None, ge=1, le=3650)
+    # Bounded: each entry becomes a bind parameter in `Job.source.in_(...)`.
+    # Was `Optional[list[str]]` with no bound at all.
+    sources: Optional[list[SourceName]] = Field(default=None, max_length=_MAX_SOURCES)
+    llm_provider: Optional[str] = Field(default=None, max_length=16)
+    model_name: Optional[GeminiModelName] = None
 
     # Pagination. Capped so one request can never pull an unbounded result set.
     # There is no total count in the response — the list is simply this page.
@@ -95,15 +116,22 @@ class MatchRequest(BaseModel):
     experience_level: Optional[str] = Field(default=None, max_length=50)  # intern/fresher/no_experience/entry/mid/senior
     remote_only: bool = False
     min_salary: Optional[float] = None
-    posted_within_days: Optional[int] = None
+    max_salary: Optional[float] = Field(default=None, ge=0)
+    posted_within_days: Optional[int] = Field(default=None, ge=1, le=3650)
     # top_k is the page size. It was previously unbounded, which made it both a
     # `LIMIT -n` on negative input and an unbounded row pull on large input.
     top_k: int = Field(default=10, ge=1, le=100)
     # Skip this many eligible candidates before ranking. Lets a caller walk past
     # the first page of an unranked-by-score ordering without re-sending filters.
     offset: int = Field(default=0, ge=0)
-    llm_provider: Optional[str] = None  # "auto" | "gemini" | "none"
-    model_name: Optional[str] = None
+    llm_provider: Optional[str] = Field(default=None, max_length=16)
+    model_name: Optional[GeminiModelName] = None
+    # Bounded, same as SearchRequest. This field did not exist while the graph
+    # already read `req.sources` to narrow the adapter fan-out — so every
+    # /jobs/match request died with AttributeError before reaching a single job.
+    # Restored so the intent in graph.py is expressible, and so match can be
+    # narrowed by source the same way search can.
+    sources: Optional[list[SourceName]] = Field(default=None, max_length=_MAX_SOURCES)
 
 
 class MatchedJobOut(BaseModel):

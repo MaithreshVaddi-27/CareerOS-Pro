@@ -37,11 +37,23 @@ def get_client() -> QdrantClient:
             return _client_singleton
         qdrant_url = getattr(settings, "qdrant_url", "") or ""
         if qdrant_url and (qdrant_url.startswith("http://") or qdrant_url.startswith("https://")):
-            _client_singleton = QdrantClient(url=qdrant_url)
+            client = QdrantClient(url=qdrant_url)
         else:
             # Local file mode (default: ./qdrant_local)
-            _client_singleton = QdrantClient(path=qdrant_url or "./qdrant_local")
-        ensure_collection(_client_singleton)
+            client = QdrantClient(path=qdrant_url or "./qdrant_local")
+        # Publish the singleton only after the collection is confirmed. Assigning
+        # first and calling ensure_collection after meant a failure there left a
+        # live `_client_singleton` with `_collection_ready` still False — and the
+        # fast path at the top of this function returns on the client alone, so
+        # every later call short-circuited and never retried. One transient
+        # startup blip then permanently broke indexing and search for the life of
+        # the process, with no error on the second call to explain it.
+        try:
+            ensure_collection(client)
+        except Exception:
+            client.close()
+            raise
+        _client_singleton = client
         _collection_ready = True
     return _client_singleton
 

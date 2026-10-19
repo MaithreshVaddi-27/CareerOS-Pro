@@ -27,7 +27,14 @@ class Job(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
 
     # identity / dedup
-    url_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    # unique=True already builds a UNIQUE index, which a B-tree serves for both
+    # the uniqueness check and lookups. `index=True` alongside it asked SQLAlchemy
+    # for a second, plain index over the same column — pure write amplification
+    # on the hottest insert path in the system, with no query it made faster.
+    # (An existing deploy still has the redundant ix_jobs_url_hash; dropping it is
+    # a one-line manual ALTER, same class as any other column change. See the
+    # "no migration tool" note in AUDIT.md.)
+    url_hash: Mapped[str] = mapped_column(String(64), unique=True)
     content_hash: Mapped[str] = mapped_column(String(64), index=True)
 
     # raw + normalized fields

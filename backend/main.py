@@ -240,9 +240,9 @@ def readiness():
 @app.get("/agents/health", dependencies=[Depends(require_api_key)])
 def agents_health():
     """Supervisor view over every agent CareerOS runs — LLM providers
-    (Gemini, see services/model_router.py) and job
+    (Gemini, see services/matching/model_router.py) and job
     source agents (jsearch/adzuna/remotive/remoteok/arbeitnow/company
-    scraper, see services/job_api_adapter.py). Each entry is per-process,
+    scraper, see services/sourcing/job_api_adapter.py). Each entry is per-process,
     in-memory, reset on restart — see core/monitoring.py.
 
     status per agent: 'unknown' (no calls yet), 'healthy', 'degraded'
@@ -288,9 +288,15 @@ def _ingest_filter_and_select(db: Session, req: SearchRequest, raw_postings: lis
     # Filter in SQL, then apply the authoritative Python predicate over the
     # result. build_sql_filters is a superset, so this is a narrowing second pass.
     # Previously this hand-rolled the same clauses, duplicating filter logic.
+    #
+    # One `now` shared by both passes. They must agree on the reference instant,
+    # or the SQL pass runs against an earlier cutoff than the Python pass and can
+    # be *stricter* — silently dropping a boundary row the Python predicate would
+    # have kept, which is exactly what the superset contract forbids.
+    now = datetime.now(timezone.utc)
     candidate_jobs = db.execute(
         select(Job)
-        .where(*build_sql_filters(req))
+        .where(*build_sql_filters(req, now=now))
         .order_by(
             Job.posted_at.is_(None), Job.posted_at.desc(), Job.created_at.desc(), Job.id.desc()
         )
@@ -298,7 +304,7 @@ def _ingest_filter_and_select(db: Session, req: SearchRequest, raw_postings: lis
         .limit(req.limit)
     ).scalars().all()
 
-    filtered = apply_hard_filters(candidate_jobs, req)
+    filtered = apply_hard_filters(candidate_jobs, req, now=now)
     # Materialise BEFORE rollback — after it, every attribute access is a SELECT.
     out = [JobOut.model_validate(job) for job in filtered]
     # Read-only tail: hand the pooled connection back before the response is
@@ -424,7 +430,13 @@ async def verify_job(job_id: str, db: Session = Depends(get_db)):
     result = await verify_job_posting(apply_url, title, company)
 
     def _persist() -> JobOut:
+        # Re-fetch rather than trusting the earlier read: the outbound scrape above
+        # can take seconds, and a concurrent retention run (or another verify) can
+        # have deleted the row in between. db.get() then returned None and the next
+        # line raised AttributeError — a 500 for what is really a 404.
         job = db.get(Job, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
         job.verified = result.verified
         if result.verified:
             job.verified_at = datetime.now(timezone.utc)

@@ -10,6 +10,7 @@ rolling alias 'gemini-flash-latest' (config default) so this doesn't silently
 
 import json
 import logging
+import re
 import time
 from typing import Protocol
 
@@ -240,13 +241,48 @@ def get_model_router() -> ModelRouter:
     )
 
 
+# Model ids the API will accept from a caller. Free-form: a request may name any
+# Gemini model, including a fine-tune or a preview build the operator has access
+# to but this process does not know about. What it may not do is inject path
+# segments — the id is interpolated into the URL below.
+#
+# MatchRequest.model_name carries the same pattern, so an API caller gets a 422
+# naming the field instead of a 500 from deep inside the graph. This check stays
+# because it is the actual trust boundary: the value becomes part of a request
+# path, and get_model_router_for_request is callable from anywhere.
+_MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}$")
+
+
 def get_model_router_for_request(llm_provider: str | None = None, model_name: str | None = None) -> ModelRouter:
-    """Create a ModelRouter with per-request provider/model override (Gemini only)."""
+    """Create a ModelRouter with per-request provider/model override (Gemini only).
+
+    `model_name` used to be accepted and then thrown away — the provider was
+    always built with `settings.gemini_model`, so a client asking for one model
+    silently got another and the response looked identical. Two reasons to fix
+    it rather than drop the parameter: the field is already threaded all the
+    way from the request schema through the graph, and model choice is the
+    main thing a caller legitimately varies per request (cheap model for bulk
+    explanations, a stronger one for hard ones).
+
+    A rejected id falls back to the configured default rather than raising:
+    this runs inside a LangGraph node, where an unhandled exception becomes an
+    opaque 500 on a request that was otherwise well-formed.
+    """
     provider_mode = llm_provider or settings.llm_provider_mode
     if provider_mode not in ("auto", "gemini", "none"):
         provider_mode = "gemini"
 
-    gemini = GeminiProvider(settings.gemini_api_key, settings.gemini_model) if settings.gemini_api_key else None
+    model = settings.gemini_model
+    if model_name and model_name != model:
+        if not _MODEL_ID_RE.match(model_name):
+            logger.warning(
+                "ignoring unsupported model_name %r — falling back to %s",
+                model_name, settings.gemini_model,
+            )
+        else:
+            model = model_name
+
+    gemini = GeminiProvider(settings.gemini_api_key, model) if settings.gemini_api_key else None
 
     return ModelRouter(
         gemini=gemini,

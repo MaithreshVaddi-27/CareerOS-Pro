@@ -16,7 +16,7 @@ from typing import Protocol
 import httpx
 
 from backend.core.config import get_settings
-from backend.core.monitoring import agent_monitor
+from backend.core.monitoring import agent_monitor, scrub_secrets
 from backend.schemas import RawJobPosting
 from backend.services.sourcing.company_scraper import scrape_company_jobs
 
@@ -27,18 +27,14 @@ settings = get_settings()
 # stringifies the full request URL. Adzuna also returns 401 on a bad key, which
 # is not in get_with_retry's 429/5xx retry set, so raise_for_status() surfaces
 # straight into the error string. Both credentials are the first two params, so
-# they fit inside the monitor's 300-char truncation and were readable via
-# GET /agents/health. Scrub at the sink.
-_SECRET_QUERY_KEYS = ("app_id", "app_key", "api_key", "apikey", "token", "access_token")
-_SECRET_PARAM_RE = re.compile(
-    r"(?i)([?&](?:" + "|".join(_SECRET_QUERY_KEYS) + r")=)[^&\s'\"]+"
-)
-
-
+# they fit inside the monitor's truncation and were readable via
+# GET /agents/health. The same shape leaks a Gemini key, so the pattern set now
+# lives in one place — backend.core.monitoring.scrub_secrets — and this module
+# reuses it for both the log line and the monitor record.
 def _redact(text: str) -> str:
-    """Strip credential query params from an error string before it is stored in
-    the agent monitor, which /agents/health returns to the caller."""
-    return _SECRET_PARAM_RE.sub(r"\1***", text)[:300]
+    """Strip credential query params before this string reaches a log line or the
+    agent monitor, which /agents/health returns to the caller."""
+    return scrub_secrets(text)
 
 # Use v2 endpoint per RapidAPI JSearch documentation
 # NOTE: Requires active RapidAPI subscription (free tier ~200 req/month)

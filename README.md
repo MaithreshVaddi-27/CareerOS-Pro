@@ -266,10 +266,15 @@ All routes except `/health*` require the `X-API-Key` header.
 // → [ JobOut, … ]   (at most `limit` rows)
 ```
 
-`sources` filters on the **stored** `Job.source` value, not on the `JOB_SOURCES`
-enable name. The two differ for exactly one source: the career-page scraper is enabled
-by `company` in `JOB_SOURCES` but writes rows tagged `company_scraper`. Every other
-source uses the same name in both places.
+`sources` accepts either the enabling name or the stored tag. The two differ for
+exactly one source: the career-page scraper is enabled by `company` in
+`JOB_SOURCES` but writes rows tagged `company_scraper`. Both spellings now match
+its rows, so `"company"` and `"company_scraper"` are equivalent here. Every
+other source uses the same name in both places.
+
+A salary ceiling is also available — `max_salary` — alongside `min_salary`.
+Rows whose salary could not be parsed are excluded by neither, because unknown
+is not ineligible.
 
 Filtering happens in SQL against indexed columns, and `/jobs/match` no longer loads
 the whole table. `limit`/`offset` cap how many rows come back; the response shape is

@@ -49,7 +49,6 @@ export default function App() {
         salary_max: filters.salary_max || undefined,
         posted_within_days: filters.posted_within_days || undefined,
         sources: filters.sources || [],
-        top_k: 30,
         llm_provider: llmProvider !== 'auto' ? llmProvider : undefined,
       });
       setResults(Array.isArray(data) ? data : (data.results || []));
@@ -72,9 +71,17 @@ export default function App() {
     setVerifyingId(job.id);
     try {
       const json = await apiVerifyJob(job.id);
-      setSelectedJob((prev) => (prev?.id === job.id ? { ...prev, ...json, verified: true } : prev));
-    } catch {
-      // keep silent; verification is best-effort
+      // Trust the server's verdict. This used to append `verified: true` after
+      // the spread, which overrode whatever the backend actually said — so a
+      // posting the verifier found closed or unconfirmed rendered as Verified in
+      // the modal while the row was deactivated server-side. Spec 2.3: never
+      // guess. An `is_active` flip also has to reach the list, not just the modal.
+      setSelectedJob((prev) => (prev?.id === job.id ? { ...prev, ...json } : prev));
+      setResults((prev) =>
+        prev.map((r) => (r.id === job.id ? { ...r, ...json } : r))
+      );
+    } catch (e) {
+      setError(e.message);
     } finally {
       setVerifyingId(null);
     }
@@ -138,7 +145,7 @@ export default function App() {
                     transition={reducedMotion ? { opacity: { duration: 0.2 }, delay: Math.min(idx, 8) * 0.04 } : { ...defaultSpring, delay: Math.min(idx, 8) * 0.04 }}
                   >
                     <JobCard
-                      job={{ ...job, match_score: job.match_score ?? job.matchPercentage ?? 0 }}
+                      job={job}
                       onOpen={openJob}
                       onSave={saveJob}
                       saved={saved.some((s) => s.id === job.id)}

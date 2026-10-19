@@ -70,10 +70,9 @@ export async function searchJobs({
   remote = '',
   experience_level = '',
   salary_min = '',
-  _salary_max = '',
+  salary_max = '',
   posted_within_days = '',
   sources = [],
-  _top_k = 20,
   llm_provider,
   model_name,
 }) {
@@ -88,6 +87,10 @@ export async function searchJobs({
     // Backend expects remote_only: true for remote-only filter
     remote_only: remote === 'remote' ? true : false,
     min_salary: salary_min ? Number(salary_min) : undefined,
+    // Was destructured as `_salary_max` and never sent, so the visible "Max
+    // salary" input in Filters.jsx did nothing at all. The backend grew
+    // `max_salary` to match.
+    max_salary: salary_max ? Number(salary_max) : undefined,
     posted_within_days: posted_within_days ? Number(posted_within_days) : undefined,
     sources: sources && sources.length ? sources : undefined,
     llm_provider: llm_provider || undefined,
