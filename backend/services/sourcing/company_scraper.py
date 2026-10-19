@@ -1,13 +1,28 @@
-"""Company career-page scraper.
+"""Company career-page scraper + multi-website job board search.
 
-Politely scrapes job listings from a company's own career page. Everything here
-is deterministic: no LLM, no guessing. Fields we cannot read stay empty so
+Politely scrapes job listings from a company's own career page AND searches
+across multiple free job boards to broaden coverage. Everything here is
+deterministic: no LLM, no guessing. Fields we cannot read stay empty so
 ``normalize_job`` can mark them ``unknown`` (spec 2.3).
 
-Shape of a run:
+Two modes:
+
+1. Single company career page (existing): guess the company's domain, probe
+   known career URL patterns, extract job cards.
+2. Multi-website job board search (new): given a query + location, fan out
+   across several job boards in parallel, extract cards from each, and return
+   an aggregated de-duplicated list of findings.
+
+Shape of a run (company page):
     1. resolve the career URL (explicit, or probed from known patterns)
     2. fetch with per-domain concurrency, bounded retry, TTL cache
     3. extract cards, then per-card fields, filtering by location if given
+
+Shape of a run (multi-website):
+    1. build search URLs for each enabled job board from the query + location
+    2. fetch each board concurrently (per-domain semaphore + robots.txt)
+    3. extract cards from each board, normalise board-specific fields
+    4. de-duplicate across boards by source_id and return the list
 """
 
 from __future__ import annotations
@@ -18,8 +33,8 @@ import logging
 import random
 import re
 import time
-from typing import Dict, List, Optional
-from urllib.parse import urljoin, urlparse, urlunparse
+from typing import Dict, List, Optional, Tuple
+from urllib.parse import quote, urljoin, urlparse, urlunparse
 from urllib.robotparser import RobotFileParser
 
 import httpx
@@ -43,6 +58,7 @@ async def _guard_request(request: httpx.Request) -> None:
     return value of a plain function.
     """
     assert_public_https(str(request.url))
+
 
 # Anchor text that is navigation, not a job title.
 _NAV_WORDS = ("apply", "read more", "skip", "home", "learn more", "view job", "details")
@@ -68,13 +84,24 @@ _EMPLOYMENT_MARKERS = (
     "contract",
 )
 
+# Job boards we search across when running multi-website search. Each entry is
+# a search URL template with {query} and {location} placeholders. Boards are
+# chosen because they are free, credential-less, and tend to render server-side
+# HTML we can parse without an LLM or a headless browser.
+JOB_BOARD_SEARCH_PATTERNS: dict[str, str] = {
+    "weworkremotely": "https://weworkremotely.com/remote-jobs/search?term={query}",
+    "wellfound": "https://wellfound.com/role/{query}",
+    "remoteok": "https://remoteok.com/remote-{query}-jobs",
+    "workingnomads": "https://www.workingnomads.com/jobs?search={query}",
+    "jobspresso": "https://jobspresso.co/?s={query}",
+}
 
 class CompanyScraper:
-    """Scrapes job listings from company career pages.
+    """Scrapes job listings from company career pages AND multiple job boards.
 
-    Every fetch is gated on the site's robots.txt (audit A6); a disallowed path is
-    never requested. Politeness comes from robots.txt plus a per-domain semaphore,
-    jitter, a TTL cache and a configurable User-Agent.
+    Every fetch is gated on the site's robots.txt (audit A6); a disallowed path
+    is never requested. Politeness comes from robots.txt plus a per-domain
+    semaphore, jitter, a TTL cache and a configurable User-Agent.
     """
 
     # Probed in order; first pattern whose page yields job cards wins.
@@ -99,6 +126,7 @@ class CompanyScraper:
         ".job-item",
         ".position-list li",
         ".jobs-list li",
+        ".job-listings li",
         ".job-listings li",
         ".opening-list li",
         "#jobs .job",
@@ -205,6 +233,23 @@ class CompanyScraper:
             if len(candidates) >= self._max_probes:
                 break
         return candidates
+
+    def _board_search_url(self, board: str, query: str, location: Optional[str]) -> Optional[str]:
+        """Build a search URL for a job board, skipping boards whose template
+        we cannot fill safely."""
+        template = JOB_BOARD_SEARCH_PATTERNS.get(board)
+        if not template:
+            return None
+        encoded_query = quote(query.strip())
+        url = template.replace("{query}", encoded_query)
+        if "{location}" in template and location:
+            url = url.replace("{location}", quote(location.strip()))
+        elif "{location}" in template:
+            url = url.replace("{location}", "")
+        if not is_public_https(url):
+            logger.warning("board %s produced a non-public URL %r — skipping", board, url)
+            return None
+        return url
 
     # -------------------------------------------------------------------------
     # Fetching
@@ -515,6 +560,26 @@ class CompanyScraper:
             return urljoin(base_url, links[0]["href"].strip())
         return None
 
+    @staticmethod
+    def _extract_board_company(card: BeautifulSoup, board: str) -> str:
+        """Best-effort employer name extraction tuned per board."""
+        text = card.get_text(separator=" ", strip=True)
+        # Boards often put the company right after the title, e.g. "Acme Corp · Senior Engineer".
+        for sep in (" · ", " | ", " — ", " - ", " at ", " @ "):
+            if sep in text:
+                candidate = text.split(sep)[0].strip()
+                if 1 < len(candidate) < 60 and not any(w in candidate.lower() for w in _NAV_WORDS):
+                    return candidate
+        return ""
+
+    @staticmethod
+    def _extract_board_location(card: BeautifulSoup) -> str:
+        text = card.get_text(separator=" ", strip=True)
+        city = _CITY_REGION_RE.search(text)
+        if city:
+            return city.group(0).strip()
+        return ""
+
     # -------------------------------------------------------------------------
     # Identity
     # -------------------------------------------------------------------------
@@ -533,7 +598,7 @@ class CompanyScraper:
         return wanted.strip().lower() in location_raw.lower()
 
     # -------------------------------------------------------------------------
-    # Public API
+    # Public API — single company career page (existing)
     # -------------------------------------------------------------------------
 
     async def scrape_company_jobs(
@@ -554,6 +619,7 @@ class CompanyScraper:
             a scrape is best-effort enrichment, never a hard dependency.
         """
         try:
+            career_url: Optional[str] = None
             if custom_url:
                 # Explicit URL wins even if it looks sparse — the caller asked
                 # for this page specifically.
@@ -640,6 +706,135 @@ class CompanyScraper:
                     return text
         return None
 
+    # -------------------------------------------------------------------------
+    # Public API — multi-website job board search (new)
+    # -------------------------------------------------------------------------
+
+    async def scrape_multiple_websites(
+        self,
+        query: str,
+        location: Optional[str] = None,
+        boards: Optional[List[str]] = None,
+    ) -> List[RawJobPosting]:
+        """Search across multiple job board websites and return aggregated findings.
+
+        Fans out to every enabled board concurrently, extracts cards from each,
+        normalises board-specific fields, de-duplicates across boards, and returns
+        the combined list. Boards that fail (robots.txt disallow, transport error,
+        no cards) are skipped silently so one dead board never kills the run.
+
+        Args:
+            query: Free-text search term (role, skill, keyword).
+            location: Optional location filter.
+            boards: Board names to search. Defaults to every board in
+                ``JOB_BOARD_SEARCH_PATTERNS``. Unknown names are ignored.
+
+        Returns:
+            Aggregated, de-duplicated postings from all boards that responded.
+            Empty list on total failure — best-effort enrichment only.
+        """
+        if not query or not query.strip():
+            return []
+
+        target_boards = boards or list(JOB_BOARD_SEARCH_PATTERNS.keys())
+        # De-duplicate while preserving order.
+        seen_boards: set[str] = set()
+        ordered_boards: List[str] = []
+        for b in target_boards:
+            if b not in seen_boards:
+                seen_boards.add(b)
+                ordered_boards.append(b)
+
+        logger.info("Searching %d job boards for %r", len(ordered_boards), query)
+
+        async def _scrape_one_board(board: str) -> Tuple[str, List[RawJobPosting]]:
+            url = self._board_search_url(board, query, location)
+            if not url:
+                return board, []
+            html = await self._fetch_html(url)
+            if not html:
+                return board, []
+            cards = self._extract_job_cards(html)
+            if not cards:
+                return board, []
+            postings = self._build_board_postings(cards, board, url, location)
+            return board, postings
+
+        scraped = await asyncio.gather(
+            *(_scrape_one_board(b) for b in ordered_boards), return_exceptions=True
+        )
+
+        results: List[RawJobPosting] = []
+        seen: set[str] = set()
+        for outcome in scraped:
+            if isinstance(outcome, BaseException):
+                logger.warning("Multi-website scrape board failed: %s", outcome)
+                continue
+            board_name, board_postings = outcome
+            for p in board_postings:
+                if p.source_id in seen:
+                    continue
+                seen.add(p.source_id)
+                results.append(p)
+
+        logger.info(
+            "Multi-website search for %r returned %d jobs across %d boards",
+            query, len(results), len(ordered_boards),
+        )
+        return results
+
+    def _build_board_postings(
+        self,
+        cards: List[BeautifulSoup],
+        board: str,
+        base_url: str,
+        location: Optional[str],
+    ) -> List[RawJobPosting]:
+        results: List[RawJobPosting] = []
+        seen: set[str] = set()
+
+        for idx, card in enumerate(cards):
+            try:
+                title = self._extract_title(card).strip()
+                if not title:
+                    continue
+
+                location_raw = self._extract_board_location(card).strip()
+                if not self._matches_location(location_raw, location):
+                    continue
+
+                company = self._extract_board_company(card, board).strip() or board.title()
+                apply_url = self._extract_apply_url(card, base_url)
+                if not apply_url:
+                    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-") or "job"
+                    apply_url = f"{base_url.rstrip('/')}/job/{slug}-{idx}"
+
+                source_id = self._compute_source_id(title, company, location_raw, apply_url)
+                if source_id in seen:
+                    continue
+                seen.add(source_id)
+
+                results.append(
+                    RawJobPosting(
+                        source=f"company_scraper:{board}",
+                        source_id=source_id,
+                        title=title,
+                        company=company,
+                        location_raw=location_raw,
+                        employment_type_raw=self._extract_employment_type(card),
+                        description=self._extract_description(card).strip(),
+                        apply_url=apply_url,
+                        posted_at_raw=None,
+                        salary_raw=self._extract_salary(card),
+                    )
+                )
+            except Exception as exc:  # one malformed card must not kill the batch
+                logger.warning("Skipping malformed board card #%d on %s: %s", idx, board, exc)
+
+        if results:
+            logger.info("Board %s yielded %d jobs", board, len(results))
+        return results
+
 
 async def scrape_company_jobs(
     company_name: str,
@@ -649,3 +844,13 @@ async def scrape_company_jobs(
     """Module-level entry point used by the job-source adapter."""
     async with CompanyScraper() as scraper:
         return await scraper.scrape_company_jobs(company_name, location, custom_url)
+
+
+async def scrape_multiple_websites(
+    query: str,
+    location: Optional[str] = None,
+    boards: Optional[List[str]] = None,
+) -> List[RawJobPosting]:
+    """Module-level entry point for multi-website job board search."""
+    async with CompanyScraper() as scraper:
+        return await scraper.scrape_multiple_websites(query, location, boards)

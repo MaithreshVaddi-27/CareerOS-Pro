@@ -585,3 +585,146 @@ def test_crawl_delay_is_honoured_and_capped(scraper, monkeypatch):
     assert asyncio.run(run()) == CAREER_HTML
     # 30s requested, capped to 10s so one site cannot stall the pipeline.
     assert slept == [10.0]
+
+
+# ---------------------------------------------------------------------------
+# Multi-website job board search
+# ---------------------------------------------------------------------------
+
+BOARD_HTML = """
+<html><body>
+  <div class="job-card">
+    <h3>Senior Python Engineer</h3>
+    <span class="company">BoardCorp</span>
+    <div class="location">Berlin, Germany</div>
+    <p class="description">Full-time Python role.</p>
+    <a href="/jobs/1/apply">Apply now</a>
+  </div>
+  <div class="job-card">
+    <h3>Backend Developer</h3>
+    <span class="company">BoardCorp</span>
+    <div class="location">Remote</div>
+    <p class="description">Part-time backend work.</p>
+    <a href="/jobs/2/apply">Apply now</a>
+  </div>
+</body></html>
+"""
+
+
+def _install_board_transport(scraper, pages):
+    """Route scraper requests through `pages` (url -> html), robots.txt -> 404."""
+
+    async def route(request):
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)
+        for url, html in pages.items():
+            if str(request.url).rstrip("/") == url.rstrip("/"):
+                return httpx.Response(200, text=html)
+        return httpx.Response(404)
+
+    original = scraper._get_client
+
+    def get_client():
+        c = original()
+        c._transport = httpx.MockTransport(route)
+        return c
+
+    scraper._get_client = get_client
+    return original
+
+
+def test_multi_website_search_aggregates_across_boards(scraper):
+    """Multiple boards are fanned out and results are combined into one list."""
+    pages = {
+        "https://weworkremotely.com/remote-jobs/search?term=python": BOARD_HTML,
+        "https://remoteok.com/remote-python-jobs": BOARD_HTML,
+        "https://wellfound.com/role/python": BOARD_HTML,
+    }
+    _install_board_transport(scraper, pages)
+
+    results = asyncio.run(scraper.scrape_multiple_websites("python", location="Berlin"))
+
+    assert len(results) > 0
+    # All results carry the board-scoped source.
+    for r in results:
+        assert r.source.startswith("company_scraper:")
+    # Results come from multiple boards (each board's apply URL differs).
+    boards_seen = {r.source.split(":", 1)[1] for r in results}
+    assert len(boards_seen) == 3
+    # At least one board found the Berlin role.
+    assert any("Berlin" in (r.location_raw or "") for r in results)
+
+
+def test_multi_website_search_empty_query_returns_empty(scraper):
+    """An empty query returns nothing without making any requests."""
+    calls = []
+
+    async def fake(url):
+        calls.append(url)
+        return BOARD_HTML
+
+    scraper._fetch_html = fake
+    assert asyncio.run(scraper.scrape_multiple_websites("")) == []
+    assert asyncio.run(scraper.scrape_multiple_websites("   ")) == []
+    assert calls == []
+
+
+def test_multi_website_search_skips_failed_boards(scraper):
+    """A board that returns no HTML or no cards is skipped, others still return."""
+    pages = {
+        "https://weworkremotely.com/remote-jobs/search?term=python": BOARD_HTML,
+        "https://remoteok.com/remote-python-jobs": None,  # transport miss
+        "https://wellfound.com/role/python": "",  # empty HTML -> no cards
+    }
+    _install_board_transport(scraper, pages)
+
+    results = asyncio.run(scraper.scrape_multiple_websites("python"))
+
+    assert len(results) > 0
+    assert all(r.title for r in results)
+
+
+def test_multi_website_search_respects_location_filter(scraper):
+    """Results are filtered by location when one is provided."""
+    pages = {
+        "https://weworkremotely.com/remote-jobs/search?term=python": BOARD_HTML,
+    }
+    _install_board_transport(scraper, pages)
+
+    all_results = asyncio.run(scraper.scrape_multiple_websites("python"))
+    berlin_results = asyncio.run(scraper.scrape_multiple_websites("python", location="Berlin"))
+
+    # Berlin filter keeps the Berlin card, drops the Remote one.
+    assert len(berlin_results) <= len(all_results)
+    assert all("Berlin" in (r.location_raw or "") for r in berlin_results)
+
+
+def test_multi_website_search_board_selection(scraper, monkeypatch):
+    """Only the requested boards are searched when `boards` is given."""
+    fetched = []
+
+    async def fake_fetch(url):
+        fetched.append(url)
+        return BOARD_HTML
+
+    scraper._fetch_html = fake_fetch
+
+    asyncio.run(scraper.scrape_multiple_websites("python", boards=["weworkremotely"]))
+
+    assert len(fetched) == 1
+    assert "weworkremotely" in fetched[0]
+    assert "remoteok" not in "".join(fetched)
+    assert "wellfound" not in "".join(fetched)
+
+
+def test_multi_website_search_unknown_board_ignored(scraper):
+    """Unknown board names are ignored rather than crashing."""
+    pages = {
+        "https://weworkremotely.com/remote-jobs/search?term=python": BOARD_HTML,
+    }
+    _install_board_transport(scraper, pages)
+
+    results = asyncio.run(
+        scraper.scrape_multiple_websites("python", boards=["weworkremotely", "nonexistent_board"])
+    )
+    assert len(results) > 0

@@ -18,7 +18,7 @@ import httpx
 from backend.core.config import get_settings
 from backend.core.monitoring import agent_monitor, scrub_secrets
 from backend.schemas import RawJobPosting
-from backend.services.sourcing.company_scraper import scrape_company_jobs
+from backend.services.sourcing.company_scraper import scrape_company_jobs, scrape_multiple_websites
 
 logger = logging.getLogger("careeros")
 settings = get_settings()
@@ -460,18 +460,20 @@ def get_adapter(sources: list[str] | None = None) -> JobSourceAdapter:
 
 
 class _CompanyScraperAdapter:
-    """Adapter wrapping the company career page scraper.
+    """Adapter wrapping the company career page scraper and multi-website search.
 
     Free and credential-free, so it can be combined with the keyed sources.
-    It only fires when the query actually names a company - see
-    ``_infer_company_names_from_query`` for why that matters.
+    When the query names a company, that company's career page is scraped.
+    Otherwise the search fans out across multiple free job boards to broaden
+    coverage — this is the path that increases findings from more websites.
     """
 
     async def search(self, query: str, location: str | None = None) -> list[RawJobPosting]:
-        """Scrape career pages of companies named in the query.
+        """Scrape companies named in the query, or fan out across job boards.
 
-        Scraping is best-effort enrichment: a query naming no company returns
-        nothing rather than inventing a source to scrape.
+        Scraping is best-effort enrichment. A query naming a company scrapes that
+        company's career page; a query with no company searches multiple job
+        boards and returns an aggregated list of findings.
         """
         explicit = re.match(r"^\s*company\s*:\s*(.+)$", query, re.I)
         candidates = (
@@ -479,30 +481,32 @@ class _CompanyScraperAdapter:
             if explicit
             else await _infer_company_names_from_query(query)
         )
-        if not candidates:
-            logger.info("No company named in query %r - nothing to scrape", query)
-            return []
 
-        semaphore = asyncio.Semaphore(settings.company_scraper_max_concurrency)
+        if candidates:
+            semaphore = asyncio.Semaphore(settings.company_scraper_max_concurrency)
 
-        async def _scrape_one(company_name: str) -> list[RawJobPosting]:
-            async with semaphore:
-                return await scrape_company_jobs(
-                    company_name=company_name,
-                    location=location,
-                )
+            async def _scrape_one(company_name: str) -> list[RawJobPosting]:
+                async with semaphore:
+                    return await scrape_company_jobs(
+                        company_name=company_name,
+                        location=location,
+                    )
 
-        scraped = await asyncio.gather(
-            *(_scrape_one(name) for name in candidates), return_exceptions=True
-        )
+            scraped = await asyncio.gather(
+                *(_scrape_one(name) for name in candidates), return_exceptions=True
+            )
 
-        results: list[RawJobPosting] = []
-        for company_result in scraped:
-            if isinstance(company_result, BaseException):
-                logger.warning("Company scrape failed: %s", company_result)
-                continue
-            results.extend(company_result)
-        return results
+            results: list[RawJobPosting] = []
+            for company_result in scraped:
+                if isinstance(company_result, BaseException):
+                    logger.warning("Company scrape failed: %s", company_result)
+                    continue
+                results.extend(company_result)
+            return results
+
+        # No company named: broaden by searching across multiple job boards.
+        logger.info("No company named in query %r — searching multiple job boards", query)
+        return await scrape_multiple_websites(query, location)
 
 
 async def _infer_company_names_from_query(query: str) -> list[str]:

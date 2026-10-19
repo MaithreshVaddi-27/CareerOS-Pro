@@ -5,7 +5,7 @@ Deep audit register. Bugs are tracked per phase with **Status**, **Upgrade**, an
 ## Verification baseline (green)
 
 - `ruff check backend/ tests/`: clean
-- `pytest`: 315 passed, 1 skipped
+- `pytest`: 321 passed, 1 skipped
 - `oxlint` (frontend): clean
 - `npm run build`: 433 modules, ~108 kB gzip
 
@@ -70,6 +70,18 @@ Status: **shipped** (`b7958a5`)
 
 ---
 
+## Phase 5 — Multi-website job board search expansion
+
+Status: **shipped** (`839d070`)
+
+| Bug | Status | Upgrade | Degradation |
+|---|---|---|---|
+| Company scraper only searched one company's career page | Fixed | `scrape_multiple_websites()` fans out across We Work Remotely, Wellfound, RemoteOK, Working Nomads, and Jobspresso in parallel | Boards that fail (robots.txt, transport error, no cards) are skipped silently |
+| `company` source returned nothing when no company named | Fixed | `_CompanyScraperAdapter` falls back to multi-website board search when no company is in the query | Results from boards are tagged `company_scraper:<board>` for traceability |
+| No per-board de-duplication in multi-source fan-out | Fixed | `source_id` computed per board+job; cross-board dedup in `scrape_multiple_websites` | None |
+
+---
+
 ## Known limitations (deliberate, accepted)
 
 - Local MySQL unavailable in this environment; match tests use the SQLite session fixture.
@@ -79,6 +91,7 @@ Status: **shipped** (`b7958a5`)
 - `location` uses SQL `LIKE` (short codes like `in`/`ny` can over-match; authoritative Python pass rejects them).
 - Vector store falls back to local in-process implementation.
 - Human-review interrupt is wired; resume path not yet exposed over HTTP.
+- Job board search depends on server-rendered HTML; boards that require JavaScript or block bots yield fewer/no results.
 
 ---
 
