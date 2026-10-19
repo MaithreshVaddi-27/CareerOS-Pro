@@ -1,7 +1,8 @@
 # Deployment
 
-Local development, Docker, and production. See
-[CONFIGURATION.md](CONFIGURATION.md) for what each variable does.
+Local development and production, both running natively on the host — no
+container runtime. Ready-to-install unit files are in [`deploy/`](../deploy/README.md).
+See [CONFIGURATION.md](CONFIGURATION.md) for what each variable does.
 
 ---
 
@@ -80,19 +81,23 @@ python run.py --host 0.0.0.0 --port 8080 --reload --workers 4
 
 ### 3. MySQL
 
-Docker is the lowest-friction option:
+Install MySQL 8.x directly:
 
 ```bash
-docker run -d --name careeros-mysql \
-  -e MYSQL_ROOT_PASSWORD=rootpass \
-  -e MYSQL_DATABASE=careeros \
-  -e MYSQL_USER=careeros \
-  -e MYSQL_PASSWORD=your-password \
-  -p 3306:3306 \
-  mysql:8
+brew install mysql@8.4                       # macOS
+sudo apt-get install -y mysql-server-8.0     # Debian/Ubuntu
 ```
 
-Or point `MYSQL_HOST` at an existing instance. Then create the schema:
+Create the database and an application user — do not run the app as `root`:
+
+```sql
+CREATE DATABASE careeros CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'careeros'@'127.0.0.1' IDENTIFIED BY 'your-password';
+GRANT ALL ON careeros.* TO 'careeros'@'127.0.0.1';
+FLUSH PRIVILEGES;
+```
+
+An existing instance works too — just point `MYSQL_HOST` at it. Then create the schema:
 
 ```bash
 python -c "from backend.core.db import create_all; create_all()"
@@ -115,35 +120,32 @@ npm run dev               # → http://127.0.0.1:5173
 
 ---
 
-## Docker Compose
+## Qdrant
 
-Runs MySQL, the backend and the frontend together.
+There is nothing to install. With `QDRANT_URL` empty, `qdrant-client` opens an
+embedded on-disk store at `./qdrant_local` inside the backend process.
+
+Two consequences worth knowing:
+
+- It takes a **directory lock**, so only one process may open it. That is the
+  reason the API runs a single worker, and the reason `--workers > 1` needs a
+  real Qdrant server (`QDRANT_URL`) or no vector search at all.
+- The directory is the backend's only writable path. The systemd unit grants it
+  via `ReadWritePaths`.
+
+To use a real Qdrant server instead, point `QDRANT_URL` at it and the same code
+path switches to HTTP — no code change.
+
+## Redis
+
+Optional. Only needed for shared rate-limit counters across multiple workers.
 
 ```bash
-cp .env.example .env      # edit MYSQL_PASSWORD + API_KEY
-docker compose up --build
-docker compose exec backend python -c "from backend.core.db import create_all; create_all()"
+brew install redis-server      # macOS
+sudo apt-get install -y redis-server   # Debian/Ubuntu
 ```
 
-Redis for shared rate-limit counters is behind a profile, so it stays optional:
-
-```bash
-docker compose --profile ratelimit up --build
-```
-
-Set `REDIS_URL=redis://redis:6379/0` in `.env` when you enable it.
-
-Useful variations:
-
-```bash
-docker compose up --build -d          # detached
-docker compose logs -f backend        # tail backend
-docker compose exec backend pytest    # run tests in the container
-docker compose down -v                # stop, and drop the volume
-```
-
-The compose file builds from the repo-root `Dockerfile` for the backend and
-`frontend/Dockerfile` for the frontend.
+Set `REDIS_URL=redis://127.0.0.1:6379/0` in `.env` when you enable it.
 
 ---
 
@@ -159,7 +161,7 @@ The compose file builds from the repo-root `Dockerfile` for the backend and
 - [ ] `RATE_LIMIT_PER_MINUTE` set deliberately
 - [ ] `ALLOWED_ORIGINS` lists only real frontend origins
 - [ ] MySQL 8.x
-- [ ] `.env` is gitignored and not baked into the image
+- [ ] `.env` is gitignored and readable only by the service user (`chmod 600`)
 - [ ] TLS terminated in front of the API
 - [ ] `COMPANY_SCRAPER_USER_AGENT` identifies you with a contact URL
 - [ ] Health checks pointed at `/health/ready`
@@ -169,10 +171,10 @@ The compose file builds from the repo-root `Dockerfile` for the backend and
 > The checklist item above deliberately does *not* say "rotated out of band".
 > That claim used to be here and it was wrong.
 >
-> `docker-compose.yml` passes `VITE_API_KEY` to the frontend as a **build arg**,
-> and Vite inlines every `VITE_*` variable into the JavaScript bundle at build
-> time. Verified: building with `VITE_API_KEY=SUPERSECRET_PROBE_KEY` produces a
-> `dist/assets/*.js` containing that literal string.
+> Vite inlines every `VITE_*` variable into the JavaScript bundle at build
+> time, so `VITE_API_KEY` ships inside `dist/assets/*.js` for anyone who opens
+> view-source. Verified: building with `VITE_API_KEY=SUPERSECRET_PROBE_KEY`
+> produces a bundle containing that literal string.
 >
 > So the key the browser sends is readable by anyone via view-source, and the
 > API is directly callable without going through the browser at all. `CORS`
@@ -198,28 +200,44 @@ The compose file builds from the repo-root `Dockerfile` for the backend and
 ### Process model
 
 Run a **single** worker unless `REDIS_URL` is set. With in-process counters, N workers
-enforce N× the intended limit.
+enforce N× the intended limit — and embedded Qdrant takes a directory lock that only
+one process can hold, so a second worker fails to start.
 
 ```bash
-python run.py --host 0.0.0.0 --port 8000 --workers 1
-# or, with shared counters:
-REDIS_URL=redis://redis:6379/0 python run.py --host 0.0.0.0 --port 8000 --workers 4
+python run.py --host 127.0.0.1 --port 8000 --workers 1
+# or, with shared counters AND a real Qdrant server:
+REDIS_URL=redis://127.0.0.1:6379/0 python run.py --host 127.0.0.1 --port 8000 --workers 4
 ```
+
+Bind to `127.0.0.1`, not `0.0.0.0` — nginx is the only thing that should reach the
+API. `careeros-api.service` does this already.
+
+### Running as a service
+
+[`deploy/careeros-api.service`](../deploy/careeros-api.service) is a hardened unit:
+non-root, `ProtectSystem=strict`, a seccomp-style syscall and address-family
+allowlist, and `ReadWritePaths` granting write access to nothing but the Qdrant
+store and the virtualenv. Full install steps are in
+[`deploy/README.md`](../deploy/README.md).
+
+It sets `EnvironmentFile=/srv/careeros/.env`, so the same `.env` drives local
+development and production — change the path if you install elsewhere.
+
+Because `run.py` exits non-zero when `APP_ENV=production` and `API_KEY` is empty, a
+misconfigured production deploy fails loudly into a visible restart loop rather
+than quietly serving open traffic.
 
 ### Behind a reverse proxy
 
-Two things need configuring explicitly.
+[`deploy/nginx-careeros.conf`](../deploy/nginx-careeros.conf) is a complete
+working config. The two things that are easy to get wrong:
 
-**Trust the proxy.** Rate limiting keys on client IP. Without proxy headers every
-request appears to come from the proxy, so all clients share one bucket:
-
-```nginx
-proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-proxy_set_header X-Forwarded-Proto $scheme;
-```
+**Trust the proxy.** Rate limiting keys on client IP. Without
+`X-Forwarded-For` every request appears to come from nginx, so all clients share
+one bucket and you get unexplained `429`s.
 
 **Forward the API key.** It arrives as a header, so the default `proxy_pass` is
-sufficient — do not strip it.
+sufficient — do not strip it, and do not add a `proxy_set_header` for it.
 
 ### Health checks
 

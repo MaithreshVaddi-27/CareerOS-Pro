@@ -27,7 +27,7 @@ The app **refuses to start** without these. There is deliberately no default.
 |---|---|---|
 | `APP_ENV` | `development` | `development` selects in-memory LangGraph checkpoints. Anything else selects MySQL checkpoints. |
 | `DATABASE_URL` | *(empty)* | Overrides the component-based MySQL URL. Leave empty to build it from the parts below. |
-| `MYSQL_HOST` | `mysql` | Docker service name by default. |
+| `MYSQL_HOST` | `127.0.0.1` | Point at a remote host only if MySQL is not local. |
 | `MYSQL_PORT` | `3306` | |
 | `MYSQL_DATABASE` | `careeros` | |
 | `MYSQL_USER` | `careeros` | |
@@ -58,14 +58,13 @@ single worker and wrong for several — each worker counts independently, so N w
 enforce N × `RATE_LIMIT_PER_MINUTE`.
 
 ```dotenv
-REDIS_URL=redis://redis:6379/0
+REDIS_URL=redis://127.0.0.1:6379/0
 ```
 
-The bundled Redis is behind a compose profile so it stays optional:
-
-```bash
-docker compose --profile ratelimit up -d redis
-```
+Redis is optional — leave `REDIS_URL` empty and the app uses in-process counters,
+which is fine for a single worker. Install it natively (`brew install redis-server`
+or `sudo apt-get install -y redis-server`) only if you run more than one worker and
+need the limits shared.
 
 `/health` reports which backend is live and marks the check `degraded` when
 production is running on in-process counters.

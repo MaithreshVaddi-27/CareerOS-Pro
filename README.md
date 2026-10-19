@@ -137,14 +137,8 @@ python -m venv backend/venv
 source backend/venv/bin/activate        # Windows: backend\venv\Scripts\activate
 pip install -r requirements.txt
 
-# Start MySQL (Docker is the least friction)
-docker run -d --name careeros-mysql \
-  -e MYSQL_ROOT_PASSWORD=rootpass \
-  -e MYSQL_DATABASE=careeros \
-  -e MYSQL_USER=careeros \
-  -e MYSQL_PASSWORD=your-password \
-  -p 3306:3306 mysql:8
-
+# MySQL 8.x must already be running and reachable on MYSQL_HOST.
+# See docs/DEPLOYMENT.md § Local development for the create-user SQL.
 python -c "from backend.core.db import create_all; create_all()"  # create the schema
 python run.py                            # → http://127.0.0.1:8000
 ```
@@ -164,16 +158,19 @@ npm run dev                              # → http://127.0.0.1:5173
 
 Set `VITE_API_BASE=http://127.0.0.1:8000` in `frontend/.env`.
 
-### Docker (both services)
+### Production
+
+Native host deployment — no container runtime. `deploy/` holds a hardened systemd
+unit and a ready nginx site config; see [`deploy/README.md`](deploy/README.md).
 
 ```bash
-cp .env.example .env                     # then edit MYSQL_PASSWORD + API_KEY
-docker compose up --build
-docker compose exec backend python -c "from backend.core.db import create_all; create_all()"
+sudo cp deploy/careeros-api.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now careeros-api
 ```
 
-Add `--profile ratelimit` to also start Redis for shared rate-limit counters (then set
-`REDIS_URL=redis://redis:6379/0`).
+Qdrant needs no install: with `QDRANT_URL` empty the client opens an embedded
+on-disk store at `./qdrant_local`. Redis is optional and only needed for shared
+rate-limit counters when running more than one worker.
 
 ### Verify it works
 
@@ -462,7 +459,7 @@ Workflow, conventions and the review checklist: **[docs/CONTRIBUTING.md](docs/CO
 | Document | What it covers |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module map, data flow, design decisions, extension points |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Local, Docker and production deployment; MySQL caveats |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Local and production deployment; MySQL caveats |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every environment variable, defaults and interactions |
 | [docs/API.md](docs/API.md) | Endpoint reference, request/response shapes, error semantics |
 | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | Dev workflow, testing conventions, PR checklist |

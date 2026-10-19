@@ -1,0 +1,66 @@
+[Unit]
+Description=CareerOS API (FastAPI + uvicorn)
+Documentation=https://github.com/MaithreshVaddi-27/CareerOS-Pro
+After=network-online.target mysql.service
+Wants=network-online.target
+# MySQL is a hard dependency: /health/ready reports 503 without it, so
+# starting early just produces a crash-loop. If MySQL runs on another host,
+# drop mysql.service from After=.
+
+[Service]
+Type=exec
+User=careeros
+Group=careeros
+WorkingDirectory=/srv/careeros
+EnvironmentFile=/srv/careeros/.env
+ExecStart=/srv/careeros/backend/venv/bin/python run.py --host 127.0.0.1 --port 8000
+
+# One worker. With in-process rate-limit counters, N workers enforce N x the
+# intended limit. Raise this only after setting REDIS_URL.
+Restart=on-failure
+RestartSec=5s
+
+# run.py exits non-zero if APP_ENV=production and API_KEY is empty, so systemd
+# restarts it into a visible crash-loop instead of serving open traffic.
+# StartLimitIntervalSec / StartLimitBurst keep that from becoming a spin.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Give uvicorn time to drain in-flight requests on stop. The 10s default cuts
+# requests off mid-flight.
+KillSignal=SIGINT
+TimeoutStopSec=45
+
+# --- Hardening -----------------------------------------------------------
+# The service reads .env, connects to MySQL and Qdrant, and makes outbound
+# HTTPS calls to job APIs and Gemini. It needs nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# Writable paths: the venv is read-only at runtime, the repo is read-only, and
+# the only writes are the Qdrant local store and the LangGraph checkpointer.
+# QDRANT_URL empty means embedded local mode, which defaults to ./qdrant_local.
+ReadWritePaths=/srv/careeros/qdrant_local /srv/careeros/backend/venv
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=careeros-api
+
+[Install]
+WantedBy=multi-user.target
