@@ -188,13 +188,15 @@ python -m backend.cli "Acme Corp" --max-concurrency 1
 
 ### Targeting a company
 
-The company adapter only fires when the query names a company:
+The company adapter fires when the query names a company:
 
 - A **proper noun** in the query — `Stripe engineer` → scrapes `stripe.com`
 - An **explicit prefix** — `company:stripe` (the escape hatch for lowercase names)
 
-A query naming no company returns no company results. It does **not** substitute a
-default shortlist.
+**When no company is named**, the adapter fans out across multiple job board websites
+(We Work Remotely, Wellfound, RemoteOK, Working Nomads, Jobspresso) to broaden
+coverage. Each board is checked against its `robots.txt`, and boards that fail are
+skipped silently. Board-specific rows are tagged `company_scraper:<board>`.
 
 ---
 

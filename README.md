@@ -381,7 +381,7 @@ a failing source degrades to an empty result and never fails the request.
 | `remotive` | none | Remote-first, generous limits. |
 | `remoteok` | none | Remote-only, no key needed. |
 | `arbeitnow` | none | EU-focused, no key needed. |
-| `company` | none | Scrapes the company's own career pages. Rows are tagged `company_scraper`. |
+| `company` | none | Scrapes the company's own career pages. Rows are tagged `company_scraper`. When no company is named in the query, fans out across multiple job boards (We Work Remotely, Wellfound, RemoteOK, Working Nomads, Jobspresso) to broaden coverage; board-specific rows are tagged `company_scraper:<board>`. |
 
 Set `JOB_API_MODE=mock` for offline development — returns a deterministic fixture set
 and performs no network I/O.
@@ -417,13 +417,24 @@ failing.
 
 ## The company scraper
 
-Free, credential-free, and deliberately conservative.
+Free, credential-free, and deliberately conservative. Two modes:
 
-**Finding the page.** Guessing `/careers` is wrong more often than it is right, so the
-scraper probes a list of candidate paths concurrently and takes the first page that
-actually yields job cards — not the first page that returns 200. A generic landing page
-that mentions "career" does not end the search. Add ATS-specific paths via
-`COMPANY_CAREER_PAGE_PATTERNS` rather than editing code.
+**Single-company mode** — when the query names a company (e.g. `company:stripe` or a
+proper noun like `Acme`), guesses the company's domain, probes known career URL
+patterns, extracts job cards, and normalizes them. Rows are tagged `company_scraper`.
+
+**Multi-website mode** — when no company is named in the query, fans out across
+several free job board websites in parallel (We Work Remotely, Wellfound, RemoteOK,
+Working Nomads, Jobspresso), respecting each site's `robots.txt`. Extracts cards
+from each board and returns an aggregated, de-duplicated list of findings tagged
+`company_scraper:<board>`. Boards that fail (robots.txt disallow, transport error,
+no cards) are skipped silently so one dead board never kills the run.
+
+**Finding the page (single-company mode).** Guessing `/careers` is wrong more often
+than it is right, so the scraper probes a list of candidate paths concurrently and
+takes the first page that actually yields job cards — not the first page that returns
+200. A generic landing page that mentions "career" does not end the search. Add
+ATS-specific paths via `COMPANY_CAREER_PAGE_PATTERNS` rather than editing code.
 
 **Politeness.** Concurrency is capped **per domain**, retries use exponential backoff
 with jitter, 429/5xx retry while 4xx fails immediately (a 403 will not become a 200),
