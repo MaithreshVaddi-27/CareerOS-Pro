@@ -137,11 +137,13 @@ class CareerOSState(TypedDict):
     rejected_ids: list[str]
 
 
-async def _discover_normalize_dedup_filter(state: CareerOSState, db: Session) -> CareerOSState:
-    req = MatchRequest(**state["request"])
-    adapter = get_adapter(req.sources)
-    raw_postings = await adapter.search(req.query, req.location)
+def _ingest_and_filter(state: CareerOSState, db: Session, req: MatchRequest, raw_postings: list) -> None:
+    """Blocking half of the discover node. Runs in a worker thread, not on the loop.
 
+    ~1000 PyMySQL round-trips for a 200-posting ingest, plus a local-Qdrant
+    upsert per new row. Inline in an async node that stalls every other
+    in-flight request for the duration.
+    """
     for raw in raw_postings:
         # Same isolation as /jobs/search: one malformed posting from one adapter
         # must not fail the whole match. Without this a single bad row failed the
@@ -178,26 +180,26 @@ async def _discover_normalize_dedup_filter(state: CareerOSState, db: Session) ->
         .limit(req.top_k * _CANDIDATE_OVERSAMPLE)
     ).scalars().all()
     filtered = apply_hard_filters(candidates, search_req)
+    # Read ids out BEFORE the rollback — touching `j.id` after it would re-SELECT.
     state["candidate_ids"] = [j.id for j in filtered]
     # Release the pooled connection before the LLM fan-out. Without this the
     # session held a transaction open — and under MySQL's REPEATABLE READ, a
     # read view open for the whole request, which stalls the InnoDB purge thread
     # and grows the undo log.
     db.rollback()
+
+
+async def _discover_normalize_dedup_filter(state: CareerOSState, db: Session) -> CareerOSState:
+    req = MatchRequest(**state["request"])
+    adapter = get_adapter(req.sources)
+    raw_postings = await adapter.search(req.query, req.location)
+
+    await asyncio.to_thread(_ingest_and_filter, state, db, req, raw_postings)
     return state
 
 
-async def _retrieve_and_rerank(state: CareerOSState, db: Session) -> CareerOSState:
-    req = MatchRequest(**state["request"])
-    client = get_client()
-    # This limit used to be a hardcoded 50, which silently capped the semantic
-    # channel: a request with top_k > 50 could never surface more than 50
-    # semantic candidates no matter how many the DB channel fetched. Scale it
-    # with the same oversample the candidate pool uses, keeping 50 as the floor.
-    semantic_hits = dict(
-        semantic_search(client, req.query, limit=max(50, req.top_k * _CANDIDATE_OVERSAMPLE))
-    )
-
+def _fetch_and_score(state: CareerOSState, db: Session, req: MatchRequest, semantic_hits: dict) -> None:
+    """Blocking half of the retrieve node. Runs in a worker thread, not on the loop."""
     # Batch fetch all jobs at once to avoid N+1 query problem
     # Only fetch active jobs to avoid loading inactive postings
     jobs_map = {}
@@ -221,6 +223,23 @@ async def _retrieve_and_rerank(state: CareerOSState, db: Session) -> CareerOSSta
                          "semantic_score": s.semantic_score, "hybrid_score": s.hybrid_score} for s in top]
     # Read-only node — same reasoning as _discover_normalize_dedup_filter.
     db.rollback()
+
+
+async def _retrieve_and_rerank(state: CareerOSState, db: Session) -> CareerOSState:
+    req = MatchRequest(**state["request"])
+
+    def _search() -> dict:
+        client = get_client()
+        # This limit used to be a hardcoded 50, which silently capped the semantic
+        # channel: a request with top_k > 50 could never surface more than 50
+        # semantic candidates no matter how many the DB channel fetched. Scale it
+        # with the same oversample the candidate pool uses, keeping 50 as the floor.
+        return dict(
+            semantic_search(client, req.query, limit=max(50, req.top_k * _CANDIDATE_OVERSAMPLE))
+        )
+
+    semantic_hits = await asyncio.to_thread(_search)
+    await asyncio.to_thread(_fetch_and_score, state, db, req, semantic_hits)
     return state
 
 
@@ -236,21 +255,30 @@ async def _evidence_and_explain(state: CareerOSState, db: Session) -> CareerOSSt
     # job inside the fan-out — an N+1 that the two call sites above already
     # fixed, and that this one had missed. At top_k=100 it was 100 extra
     # round-trips per request.
-    jobs_map: dict = {}
     to_explain = state["ranked"][:_MAX_EXPLAIN_JOBS]
-    if to_explain:
+
+    def _load_for_explain() -> dict:
+        if not to_explain:
+            return {}
         rows = db.execute(
             select(Job).where(Job.id.in_([e["job_id"] for e in to_explain]))
         ).scalars().all()
-        jobs_map = {j.id: j for j in rows}
-    db.rollback()
+        # Copy title/description into plain tuples while the rows are still
+        # loaded. Holding the ORM objects here cost a lazy re-SELECT per job
+        # below, because the rollback expires them — and those reloads ran
+        # inside asyncio.gather, interleaved with the LLM round-trips.
+        payload = {j.id: (j.title, j.description) for j in rows}
+        db.rollback()
+        return payload
+
+    explain_payload = await asyncio.to_thread(_load_for_explain)
 
     async def _explain_one(entry: dict) -> tuple[dict, object]:
-        job = jobs_map.get(entry["job_id"])
-        if not job:
+        fields = explain_payload.get(entry["job_id"])
+        if not fields:
             return entry, None
         return entry, await router.explain_match(
-            job.title, job.description, req.candidate_skills
+            fields[0], fields[1], req.candidate_skills
         )
 
     semaphore = asyncio.Semaphore(_EXPLAIN_CONCURRENCY)
