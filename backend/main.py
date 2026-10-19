@@ -77,11 +77,13 @@ async def lifespan(app: FastAPI):
     # Schema is managed externally (create tables from models or your DBA).
     # No startup DDL here — keeps environments from drifting silently.
     yield  # Application runs here
-    # Shutdown: close reusable HTTP clients, and the checkpointer's context
-    # manager. The saver was stored in graph._checkpointer_singleton["cm"] and
-    # never exited, so every shutdown leaked its connection pool.
+    # Shutdown: close reusable HTTP clients, the Qdrant client, and the
+    # checkpointer's context manager. The saver was stored in
+    # graph._checkpointer_singleton["cm"] and never exited, so every shutdown
+    # leaked its connection pool.
     from backend.graph import _checkpointer_singleton
     from backend.services.matching.model_router import aclose_client as _close_gemini
+    from backend.services.matching.vector_store import close_client as _close_qdrant
     from backend.services.sourcing.job_api_adapter import _http_client
     from backend.services.sourcing.verification import _firecrawl_client
     from backend.services.sourcing.verification import _http_client as _verify_client
@@ -90,6 +92,8 @@ async def lifespan(app: FastAPI):
     for client in (_http_client, _verify_client, _firecrawl_client):
         if client is not None:
             await client.aclose()
+
+    _close_qdrant()
 
     cm = _checkpointer_singleton.pop("cm", None)
     if cm is not None:

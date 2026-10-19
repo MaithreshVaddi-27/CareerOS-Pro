@@ -46,6 +46,31 @@ def get_client() -> QdrantClient:
     return _client_singleton
 
 
+def close_client() -> None:
+    """Release the Qdrant client. Called from the app lifespan on shutdown.
+
+    In local file mode this matters more than it looks: QdrantClient registers a
+    __del__ that closes the storage directory, and if the process exits without
+    it, the close runs during interpreter teardown when sys.meta_path is already
+    torn down. That import raises ImportError inside __del__, which Python cannot
+    report and prints as an "Exception ignored" traceback on every shutdown —
+    alarming noise on a deploy log that looks like a real failure.
+
+    Local mode also holds a directory lock, so closing properly matters when a
+    process is restarted in place.
+    """
+    global _client_singleton, _collection_ready
+    with _client_lock:
+        client, _client_singleton = _client_singleton, None
+        _collection_ready = False
+    if client is None:
+        return
+    try:
+        client.close()
+    except Exception:  # pragma: no cover - best-effort teardown
+        pass
+
+
 def ensure_collection(client: QdrantClient) -> None:
     """Idempotent, and called exactly once per process.
 

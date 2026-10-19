@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_env: str = "development"
 
-    mysql_host: str = "mysql"
+    mysql_host: str = "127.0.0.1"
     mysql_port: int = 3306
     mysql_database: str = "careeros"
     mysql_user: str = "careeros"
