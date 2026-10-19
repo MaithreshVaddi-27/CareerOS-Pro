@@ -56,7 +56,7 @@ export default function SearchBar({ onSearch, loading }) {
               className="input searchbar-input"
               value={location}
               onChange={(e) => setLocation(e.target.value)}
-              placeholder="Location (India default)"
+              placeholder="City or remote"
               aria-label="Location"
             />
           </div>

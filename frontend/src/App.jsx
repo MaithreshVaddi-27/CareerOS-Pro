@@ -24,12 +24,14 @@ export default function App() {
   const [filters, setFilters] = useState({});
   const [verifyingId, setVerifyingId] = useState(null);
   const [error, setError] = useState('');
+  const [searched, setSearched] = useState(false);
 
   const [showSkeleton, setShowSkeleton] = useState(false);
   const reducedMotion = useReducedMotion();
 
   const doSearch = useCallback(async ({ query, location, jobType }) => {
     if (!query?.trim()) return;
+    setSearched(true);
     setLoading(true);
     setError('');
     setShowSkeleton(true);
@@ -53,7 +55,16 @@ export default function App() {
       });
       setResults(Array.isArray(data) ? data : (data.results || []));
     } catch (e) {
-      setError(e.message);
+      const msg = e.message || '';
+      setError(
+        msg.includes('401') || msg.includes('403')
+          ? 'You need to sign in to search. Please check your API key.'
+          : msg.includes('Failed to fetch') || msg.includes('Network')
+          ? 'Unable to reach the search service. Check your connection and try again.'
+          : msg.includes('500')
+          ? 'The search service had a hiccup. Please try again in a moment.'
+          : msg || 'Something went wrong while searching.'
+      );
       setResults([]);
     } finally {
       setLoading(false);
@@ -114,8 +125,13 @@ export default function App() {
               animate={{ opacity: 1 }}
               transition={reducedMotion ? { delay: 0.1, duration: 0.2 } : { delay: 0.1, ...defaultSpring }}
             >
-              <h2 className="section-title">{view === 'saved' ? 'Saved opportunities' : 'Recommended'}</h2>
-              <span className="app-resultcount">{visible.length} results</span>
+              <h2 className="section-title">
+                {view === 'saved' ? 'Your saved roles' : 'Recommended roles'}
+              </h2>
+              <span className="app-resultcount">
+                {visible.length} result{visible.length !== 1 ? 's' : ''}
+                {view !== 'saved' && saved.length ? ` · ${saved.length} saved` : ''}
+              </span>
             </motion.div>
 
             <AnimatePresence>
@@ -127,7 +143,8 @@ export default function App() {
                   transition={reducedMotion ? { opacity: { duration: 0.2 } } : defaultSpring}
                   className="app-error"
                 >
-                  {error}
+                  <span role="img" aria-hidden="true">⚠️</span>
+                  <span>{error}</span>
                 </motion.div>
               ) : null}
             </AnimatePresence>
@@ -156,12 +173,26 @@ export default function App() {
 
               {!loading && !visible.length ? (
                 <motion.div layout className="glass-card app-empty">
-                  <p className="text-secondary">
-                    Start by searching for roles, stacks, or keywords — for example
-                    {' '}<Tag color="blue">Software intern</Tag>
-                    {' '}<Tag color="sky">Machine learning</Tag>
-                    {' '}<Tag color="teal">Remote</Tag>.
-                  </p>
+                  {!searched ? (
+                    <>
+                      <p className="text-secondary">
+                        Start by searching for roles, stacks, or keywords — for example
+                        {' '}<Tag color="blue">Software intern</Tag>{' '}
+                        <Tag color="sky">Machine learning</Tag>{' '}
+                        <Tag color="teal">Remote</Tag>.
+                      </p>
+                      <p className="text-secondary hint">
+                        Try “react developer remote” or “python internship Berlin”.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-secondary">
+                        No roles matched those filters. Try widening the location,
+                        salary, or experience range — or clear a filter and search again.
+                      </p>
+                    </>
+                  )}
                 </motion.div>
               ) : null}
             </section>

@@ -15,7 +15,7 @@ export default function JobDetail({ job, onClose, onVerify, verifying }) {
         </div>
         <div>
           <h3 className="detail-company">{job.company || 'Unknown'}</h3>
-          <p className="detail-location">{job.location || 'Location unspecified'}</p>
+          <p className="detail-location">{job.location || 'Location not specified'}</p>
         </div>
       </div>
 
@@ -32,12 +32,12 @@ export default function JobDetail({ job, onClose, onVerify, verifying }) {
         ) : null}
       </div>
 
-      {(job.matched_skills || job.missing_skills) ? (
+      {(job.matched_skills || job.missing_skills || job.explanation) ? (
         <section className="detail-section">
-          <h4 className="section-title">AI Analysis</h4>
+          <h4 className="section-title">Why this matches you</h4>
           {Array.isArray(job.matched_skills) && job.matched_skills.length ? (
             <div className="detail-block">
-              <p className="detail-label">MATCHED</p>
+              <p className="detail-label">Matched skills</p>
               <div className="detail-skillrow">
                 {job.matched_skills.map((s) => <Tag key={s} color="green">{s}</Tag>)}
               </div>
@@ -45,7 +45,7 @@ export default function JobDetail({ job, onClose, onVerify, verifying }) {
           ) : null}
           {Array.isArray(job.missing_skills) && job.missing_skills.length ? (
             <div>
-              <p className="detail-label">GAP</p>
+              <p className="detail-label">Skills to grow</p>
               <div className="detail-skillrow">
                 {job.missing_skills.map((s) => <Tag key={s} color="orange">{s}</Tag>)}
               </div>
@@ -73,7 +73,7 @@ export default function JobDetail({ job, onClose, onVerify, verifying }) {
           </Button>
         ) : null}
         <Button variant="secondary" size="lg" onClick={() => onVerify?.(job)} disabled={verifying}>
-          {verifying ? 'Checking…' : 'Verify posting'}
+          {verifying ? 'Checking…' : 'Check if still live'}
         </Button>
       </div>
     </Modal>
