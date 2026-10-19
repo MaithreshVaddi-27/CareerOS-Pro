@@ -55,7 +55,7 @@ export default function Header({ view, onViewChange, llmProvider, providers = []
             className="input select app-header__provider"
           >
             {providers.map((p) => (
-              <option key={p} value={p}>{p === 'auto' ? 'Auto-model' : p}</option>
+              <option key={p} value={p}>{p === 'auto' ? 'Smart model pick' : p}</option>
             ))}
           </select>
         )}
