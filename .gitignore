@@ -116,3 +116,5 @@ dmypy.json
 
 # Jupyter
 .ipynb_checkpoints/
+
+.freebuff/
