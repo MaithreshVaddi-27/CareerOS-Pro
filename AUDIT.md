@@ -4,8 +4,8 @@ Date: 2026-10-18
 
 ## Summary
 
-Second pass over backend (FastAPI/SQLAlchemy/MySQL), frontend (React/Vite), Docker
-Compose, CI, and docs. The theme was **silent failure**: most defects here did not
+Second pass over backend (FastAPI/SQLAlchemy/MySQL), frontend (React/Vite), native
+deployment, CI, and docs. The theme was **silent failure**: most defects here did not
 crash. They returned `200`, exited `0`, or rendered fine while doing nothing useful.
 
 ## Critical
@@ -50,8 +50,19 @@ crash. They returned `200`, exited `0`, or rendered fine while doing nothing use
   select and delete). Now re-checks, and reports the real `rowcount`.
 - **Pagination had no tiebreaker**, so rows with equal sort keys could repeat or skip
   across pages. Added `Job.id.desc()`.
-- **Sync PyMySQL calls inside `async def`** block the single event loop. Real
-  limitation, deliberately not rewritten — see Known Limitations.
+- **Every response re-SELECTed every row it returned.** All three handlers called
+  `db.rollback()` — which expires every ORM instance in the session — and then
+  returned live ORM objects. FastAPI's `response_model` validation touched those
+  expired attributes *after* the handler returned, one SELECT per row, on the
+  event loop. Measured on `/jobs/search`: 22/62/200 rows cost 27/65/203
+  `SELECT ... FROM jobs`. The explain node in the match graph had it too, hidden
+  inside an `asyncio.gather` fan-out. Responses are now materialised before the
+  rollback: 3 SELECTs regardless of row count.
+- **Blocking PyMySQL on the event loop.** `async def` handlers and graph nodes ran
+  their DB work inline; `/jobs/search` is ~1000 round-trips per request, during
+  which no other request could be served. The blocking halves now run via
+  `asyncio.to_thread`. The data layer is still sync PyMySQL — a full async-SQLAlchemy
+  migration remains unnecessary at this scale.
 
 ## Frontend
 
@@ -68,18 +79,23 @@ Three genuine React bugs, found by adding an `oxlint --deny correctness` gate:
 
 ## Infrastructure
 
+Docker was removed after the audit below was written — the project runs natively now
+(see `deploy/`). Findings that no longer describe a shipped file:
+
 - **`.dockerignore` did not exist.** `backend/venv` (585 MB, 8454 `.py` files, macOS
-  wheels) sat inside the `COPY backend/` line and was baked into every image — with
-  wheels wrong for the image platform. Added, plus dropped the unused ~500 MB
-  `build-essential`.
+  wheels) sat inside a `COPY backend/` line and was baked into every image, with
+  wheels wrong for the image platform.
 - **`qdrant/qdrant:latest`** — an unattended `pull` could change the on-disk format and
-  API across a minor version. All three images now pinned to exact patches.
-- **Backend waited on `service_started` for Qdrant**, which binds its port before
-  collections finish loading. Now gated on a real `/readyz` healthcheck.
-- **`$line` in the new healthcheck was interpolated by Compose itself.** Escaped to
-  `$$line`; the check is verified against a live socket (200 → pass, 503 → fail).
-- No log rotation on any service (a chatty container fills a small VPS disk), and no
-  `stop_grace_period` (10s default cuts off in-flight requests).
+  API across a minor version. Pinning was the fix at the time; the dependency is gone.
+- **A healthcheck interpolated `$line` in a way Compose consumed itself**, so the check
+  never tested what it claimed to. Verified against a live socket instead (200 → pass,
+  503 → fail). The current systemd unit asserts on `/health/ready` for the same reason.
+- **No log rotation, and no graceful stop** — the 10s default cuts off in-flight
+  requests. The systemd unit sets `TimeoutStopSec=45` and `KillSignal=SIGINT`; journald
+  rotates.
+
+Still true after Docker left:
+
 - **`requirements.txt` used `>=` ranges**, so the same commit resolved different
   packages on different days. Now exactly pinned to the versions the suite passed
   against, with a CI gate.
@@ -94,18 +110,18 @@ Three genuine React bugs, found by adding an `oxlint --deny correctness` gate:
 
 ## Known Limitations (deliberate, not deferred-by-accident)
 
-- **Sync SQL driver on the async event loop.** `get_db()` yields a sync
-  `Session`/`PyMySQL`, so a slow query stalls every concurrent request. Fixing this
-  means async SQLAlchemy (`aiomysql`) across the whole data layer — a large change with
-  its own correctness risk. Single-host and small-scale it is a throughput ceiling, not
-  a correctness bug. Documented rather than half-migrated.
+- **`get_db()` yields a sync `Session`/PyMySQL.** Handlers and graph nodes offload
+  that work to a worker thread, so it no longer stalls the loop, but a slow query
+  still occupies a thread and the engine stays sync. Migrating the data layer to
+  async SQLAlchemy (`aiomysql`) would remove the thread hop; it is a large change
+  with its own correctness risk, and unnecessary at single-host scale.
 - **No migration tool.** `create_all()` creates missing tables but will not *alter*
   existing ones. Widening a column needs a reviewed manual `ALTER` per environment.
 - **Frontend has no test framework** — no Vitest, no jsdom, no component tests. The
   gate is `oxlint --deny correctness` plus the production build. A test suite was
   skipped rather than added thin.
 - **Redis optional.** Per-process rate-limit counters under-limit by the worker count.
-  Documented in the compose file; the `ratelimit` profile fixes it.
+  Run one worker, or install Redis natively and set `REDIS_URL`.
 - **The declared SQL/Python filter over-match for `location` needles** (`ny`, `in`) is
   kept and tested, not fixed — word boundaries need dialect-specific SQL, and the Python
   pass narrows it back. One intentional skip, guarded by a test asserting the
@@ -116,10 +132,9 @@ Three genuine React bugs, found by adding an `oxlint --deny correctness` gate:
 | Gate | Result |
 |---|---|
 | `ruff check backend/ tests/` | clean |
-| `pytest` | 261 passed, 1 skipped (intentional), 5.3s |
+| `pytest` | 263 passed, 1 skipped (intentional) |
 | `oxlint --deny correctness src/` | clean |
 | `npm run build` | 433 modules, 108 kB gzip |
-| `docker compose config` | valid |
 | Pinning gate | pass |
 | Every CI command re-run locally | pass |
 
