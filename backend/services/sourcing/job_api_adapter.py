@@ -18,7 +18,11 @@ import httpx
 from backend.core.config import get_settings
 from backend.core.monitoring import agent_monitor, scrub_secrets
 from backend.schemas import RawJobPosting
-from backend.services.sourcing.company_scraper import scrape_company_jobs, scrape_multiple_websites
+from backend.services.sourcing.company_scraper import (
+    scrape_company_jobs,
+    scrape_major_tech_companies,
+    scrape_multiple_websites,
+)
 
 logger = logging.getLogger("careeros")
 settings = get_settings()
@@ -504,9 +508,30 @@ class _CompanyScraperAdapter:
                 results.extend(company_result)
             return results
 
-        # No company named: broaden by searching across multiple job boards.
-        logger.info("No company named in query %r — searching multiple job boards", query)
-        return await scrape_multiple_websites(query, location)
+        # No company named: broaden by searching across multiple job boards AND
+        # crawling major tech company career pages directly. This is the path
+        # that increases findings from more websites.
+        logger.info("No company named in query %r — searching multiple job boards and major tech companies", query)
+
+        # Run both board search and major-tech-company crawl concurrently.
+        board_task = scrape_multiple_websites(query, location)
+        tech_task = scrape_major_tech_companies(query, location)
+        board_results, tech_results = await asyncio.gather(board_task, tech_task, return_exceptions=True)
+
+        results: list[RawJobPosting] = []
+        seen: set[str] = set()
+        for source_results in (board_results, tech_results):
+            if isinstance(source_results, BaseException):
+                logger.warning("Search source failed: %s", source_results)
+                continue
+            for p in source_results:
+                if p.source_id in seen:
+                    continue
+                seen.add(p.source_id)
+                results.append(p)
+
+        logger.info("Combined search for %r returned %d total jobs", query, len(results))
+        return results
 
 
 async def _infer_company_names_from_query(query: str) -> list[str]:

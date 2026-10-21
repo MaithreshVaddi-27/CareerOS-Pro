@@ -42,6 +42,13 @@ from bs4 import BeautifulSoup
 
 from backend.core.config import get_settings
 from backend.core.netguard import BlockedTarget, assert_public_https, is_public_https
+from backend.core.sources import (
+    ALL_COMPANIES,
+    MNC_COMPANIES,
+    STARTUP_COMPANIES_EARLY,
+    STARTUP_COMPANIES_GOOD,
+    STARTUP_COMPANIES_MEDIUM,
+)
 from backend.schemas import RawJobPosting
 
 logger = logging.getLogger("careeros")
@@ -89,12 +96,44 @@ _EMPLOYMENT_MARKERS = (
 # chosen because they are free, credential-less, and tend to render server-side
 # HTML we can parse without an LLM or a headless browser.
 JOB_BOARD_SEARCH_PATTERNS: dict[str, str] = {
+    # Major job boards
+    "indeed": "https://www.indeed.com/jobs?q={query}&l={location}",
+    "glassdoor": "https://www.glassdoor.com/Job/jobs.htm?sc.keyword={query}&locT=C&locId=1&locKeyword={location}",
+    "linkedin": "https://www.linkedin.com/jobs/search/?keywords={query}&location={location}",
+    "ziprecruiter": "https://www.ziprecruiter.com/candidate/search?search={query}&location={location}",
+    "simplyhired": "https://www.simplyhired.com/search?q={query}&l={location}",
+    # Remote-first boards
     "weworkremotely": "https://weworkremotely.com/remote-jobs/search?term={query}",
     "wellfound": "https://wellfound.com/role/{query}",
     "remoteok": "https://remoteok.com/remote-{query}-jobs",
     "workingnomads": "https://www.workingnomads.com/jobs?search={query}",
     "jobspresso": "https://jobspresso.co/?s={query}",
+    # Google Jobs aggregation (server-rendered jobs search)
+    "google_jobs": "https://www.google.com/search?q={query}+jobs&ibp=htl;jobs&hl=en&gl=us",
+    # Major tech company career pages (direct crawling targets)
+    "google_careers": "https://careers.google.com/jobs/results/?q={query}",
+    "amazon_jobs": "https://www.amazon.jobs/en/jobs?keyword={query}&location={location}",
+    "microsoft_careers": "https://careers.microsoft.com/us/en/search-results?q={query}&l={location}",
+    "apple_jobs": "https://jobs.apple.com/en-us/search?query={query}&location={location}",
+    "meta_careers": "https://www.metacareers.com/jobs/?query={query}&location={location}",
+    "netflix_jobs": "https://jobs.netflix.com/search?q={query}&location={location}",
+    "uber_careers": "https://www.uber.com/global/en/careers/list/?keyword={query}&location={location}",
+    "airbnb_careers": "https://www.airbnb.com/careers/departments?query={query}&location={location}",
+    "salesforce_careers": "https://salesforce.wd1.myworkdayjobs.com/en-US/External_Career_Page?searchBarText={query}&location={location}",
+    "adobe_careers": "https://ext.adobe.com/jobs/?q={query}&l={location}",
+    "intel_careers": "https://jobs.intel.com/search?q={query}&l={location}",
+    "ibm_careers": "https://www.ibm.com/employment/search?q={query}&location={location}",
+    "oracle_careers": "https://talent.oracle.com/faces/jobs/search?q={query}&location={location}",
+    "cisco_careers": "https://jobs.cisco.com/jobs/SearchJobs/?search={query}&location={location}",
+    "nvidia_careers": "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite?q={query}&location={location}",
+    "amd_careers": "https://jobs.amd.com/search?q={query}&l={location}",
+    "qualcomm_careers": "https://qtr.avature.net/CareerCenter/Search?q={query}&location={location}",
 }
+
+# Major tech company career pages crawled directly when running
+# company-name-driven scraping. Board keys are loaded from backend.core.sources
+# (TECH_COMPANY_CAREER_BOARDS). The URL patterns above are keyed to match those
+# board names.
 
 class CompanyScraper:
     """Scrapes job listings from company career pages AND multiple job boards.
@@ -115,6 +154,11 @@ class CompanyScraper:
         "/work-with-us",
         "/vacancies",
         "/talent",
+        "/careers/search",
+        "/careers/listings",
+        "/about/careers",
+        "/company/careers",
+        "/careers/jobs",
     ]
 
     # Ordered by specificity — first selector with usable cards wins.
@@ -132,6 +176,19 @@ class CompanyScraper:
         "#jobs .job",
         ".css-1n4p8mf",
         ".css-1q2qfg6",
+        ".job-listing",
+        ".job-result",
+        ".search-result",
+        ".listing-item",
+        ".result-item",
+        ".job-row",
+        ".job-entry",
+        "tr.job",
+        ".search-job",
+        ".job-tile",
+        ".position-card",
+        ".career-item",
+        ".job-block",
     ]
 
     def __init__(
@@ -783,6 +840,150 @@ class CompanyScraper:
         )
         return results
 
+    # -------------------------------------------------------------------------
+    # Public API — major tech company career page crawling (new)
+    # -------------------------------------------------------------------------
+
+    async def scrape_major_tech_companies(
+        self,
+        query: str,
+        location: Optional[str] = None,
+        companies: Optional[List[str]] = None,
+    ) -> List[RawJobPosting]:
+        """Crawl major tech company career pages directly for job postings.
+
+        Fans out to each company's career page concurrently, extracts cards,
+        normalises fields, de-duplicates, and returns the combined list.
+        Companies that fail are skipped silently.
+
+        Args:
+            query: Free-text search term (role, skill, keyword).
+            location: Optional location filter.
+            companies: Company names to crawl. Defaults to ``MAJOR_TECH_COMPANIES``.
+
+        Returns:
+            Aggregated, de-duplicated postings from all companies that responded.
+        """
+        if not query or not query.strip():
+            return []
+
+        target_companies = companies or list(MNC_COMPANIES)
+        seen_companies: set[str] = set()
+        ordered_companies: List[str] = []
+        for c in target_companies:
+            if c.lower() not in {x.lower() for x in seen_companies}:
+                seen_companies.add(c.lower())
+                ordered_companies.append(c)
+
+        logger.info("Crawling %d major tech companies for %r", len(ordered_companies), query)
+
+        async def _scrape_one_company(company: str) -> Tuple[str, List[RawJobPosting]]:
+            try:
+                postings = await self.scrape_company_jobs(company, location)
+                return company, postings
+            except Exception as exc:  # one dead company never kills the batch
+                logger.warning("Major tech company %s failed: %s", company, exc)
+                return company, []
+
+        scraped = await asyncio.gather(
+            *(_scrape_one_company(c) for c in ordered_companies), return_exceptions=True
+        )
+
+        results: List[RawJobPosting] = []
+        seen: set[str] = set()
+        for outcome in scraped:
+            if isinstance(outcome, BaseException):
+                logger.warning("Major tech company crawl failed: %s", outcome)
+                continue
+            company_name, company_postings = outcome
+            for p in company_postings:
+                if p.source_id in seen:
+                    continue
+                seen.add(p.source_id)
+                results.append(p)
+
+        logger.info(
+            "Major tech company crawl for %r returned %d jobs across %d companies",
+            query, len(results), len(ordered_companies),
+        )
+        return results
+
+    # -------------------------------------------------------------------------
+    # Public API — startup companies by stage (new)
+    # -------------------------------------------------------------------------
+
+    async def scrape_startup_companies(
+        self,
+        query: str,
+        location: Optional[str] = None,
+        stage: str = "all",
+        companies: Optional[List[str]] = None,
+    ) -> List[RawJobPosting]:
+        """Crawl startup career pages by stage: early, medium, good, or all.
+
+        Args:
+            query: Free-text search term (role, skill, keyword).
+            location: Optional location filter.
+            stage: One of "early", "medium", "good", or "all".
+            companies: Optional override list of company names.
+
+        Returns:
+            Aggregated, de-duplicated postings from all companies that responded.
+        """
+        if not query or not query.strip():
+            return []
+
+        stage_map = {
+            "early": STARTUP_COMPANIES_EARLY,
+            "medium": STARTUP_COMPANIES_MEDIUM,
+            "good": STARTUP_COMPANIES_GOOD,
+            "all": ALL_COMPANIES,
+        }
+        if stage not in stage_map:
+            logger.warning("Unknown startup stage %r — using 'all'", stage)
+            stage = "all"
+
+        target_companies = companies or list(stage_map[stage])
+        seen_companies: set[str] = set()
+        ordered_companies: List[str] = []
+        for c in target_companies:
+            if c.lower() not in {x.lower() for x in seen_companies}:
+                seen_companies.add(c.lower())
+                ordered_companies.append(c)
+
+        logger.info("Crawling %d startup companies (stage=%s) for %r", len(ordered_companies), stage, query)
+
+        async def _scrape_one_company(company: str) -> Tuple[str, List[RawJobPosting]]:
+            try:
+                postings = await self.scrape_company_jobs(company, location)
+                return company, postings
+            except Exception as exc:
+                logger.warning("Startup company %s failed: %s", company, exc)
+                return company, []
+
+        scraped = await asyncio.gather(
+            *(_scrape_one_company(c) for c in ordered_companies), return_exceptions=True
+        )
+
+        results: List[RawJobPosting] = []
+        seen: set[str] = set()
+        for outcome in scraped:
+            if isinstance(outcome, BaseException):
+                logger.warning("Startup company crawl failed: %s", outcome)
+                continue
+            company_name, company_postings = outcome
+            for p in company_postings:
+                if p.source_id in seen:
+                    continue
+                seen.add(p.source_id)
+                results.append(p)
+
+        logger.info(
+            "Startup company crawl (stage=%s) for %r returned %d jobs across %d companies",
+            stage, query, len(results), len(ordered_companies),
+        )
+        return results
+
     def _build_board_postings(
         self,
         cards: List[BeautifulSoup],
@@ -854,3 +1055,24 @@ async def scrape_multiple_websites(
     """Module-level entry point for multi-website job board search."""
     async with CompanyScraper() as scraper:
         return await scraper.scrape_multiple_websites(query, location, boards)
+
+
+async def scrape_major_tech_companies(
+    query: str,
+    location: Optional[str] = None,
+    companies: Optional[List[str]] = None,
+) -> List[RawJobPosting]:
+    """Module-level entry point for major tech company career page crawling."""
+    async with CompanyScraper() as scraper:
+        return await scraper.scrape_major_tech_companies(query, location, companies)
+
+
+async def scrape_startup_companies(
+    query: str,
+    location: Optional[str] = None,
+    stage: str = "all",
+    companies: Optional[List[str]] = None,
+) -> List[RawJobPosting]:
+    """Module-level entry point for startup company career page crawling by stage."""
+    async with CompanyScraper() as scraper:
+        return await scraper.scrape_startup_companies(query, location, stage, companies)

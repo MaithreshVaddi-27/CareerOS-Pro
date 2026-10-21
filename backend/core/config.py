@@ -78,13 +78,13 @@ class Settings(BaseSettings):
     # Comma-separated paths probed under the company domain, highest priority
     # first. Extend this to teach the scraper a new ATS layout without code.
     company_career_page_patterns: str = ""
-    company_scraper_cache_size: int = 100  # Max entries in HTML cache
+    company_scraper_cache_size: int = 200  # Max entries in HTML cache
     company_scraper_cache_ttl_seconds: int = 900  # 0 disables expiry
-    company_scraper_max_concurrency: int = 5  # Max concurrent scraper requests per domain
+    company_scraper_max_concurrency: int = 20  # Max concurrent scraper requests per domain
     company_scraper_jitter_max: float = 0.5  # Max seconds of jitter added to retry delays
     company_scraper_timeout_seconds: float = 20.0  # Per-request HTTP timeout
-    company_scraper_max_retries: int = 2  # Retries after the first attempt
-    company_scraper_max_url_probes: int = 4  # Career URL patterns probed per company
+    company_scraper_max_retries: int = 3  # Retries after the first attempt
+    company_scraper_max_url_probes: int = 8  # Career URL patterns probed per company
     company_scraper_user_agent: str = (
         "CareerOS/1.0 (+https://github.com/MaithreshVaddi-27/CareerOS-Pro)"
     )
