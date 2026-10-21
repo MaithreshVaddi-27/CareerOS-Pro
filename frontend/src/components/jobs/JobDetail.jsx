@@ -1,6 +1,7 @@
 import Modal from '../ui/Modal';
 import Tag from '../ui/Tag';
 import Button from '../ui/Button';
+import CompanyAvatar from '../ui/CompanyAvatar';
 import { formatLabel } from '../../utils/format';
 
 export default function JobDetail({ job, onClose, onVerify, verifying }) {
@@ -10,9 +11,7 @@ export default function JobDetail({ job, onClose, onVerify, verifying }) {
   return (
     <Modal open={Boolean(job)} onClose={onClose} title={job.title}>
       <div className="detail-head">
-        <div className="detail-monogram">
-          {(job.company || '?').slice(0, 1).toUpperCase()}
-        </div>
+        <CompanyAvatar company={job.company} size={56} />
         <div>
           <h3 className="detail-company">{job.company || 'Unknown'}</h3>
           <p className="detail-location">{job.location || 'Location not specified'}</p>

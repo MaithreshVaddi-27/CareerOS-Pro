@@ -1,6 +1,7 @@
 import { motion, useMotionValue, useTransform } from 'framer-motion';
 import { useState } from 'react';
 import Tag from '../ui/Tag';
+import CompanyAvatar from '../ui/CompanyAvatar';
 import { useDragVelocity } from '../../hooks/useDragVelocity';
 import { project } from '../../utils/appleDesign';
 import { formatLabel } from '../../utils/format';
@@ -107,10 +108,7 @@ export default function JobCard({ job, onOpen, onSave, saved = false }) {
 
       <div className="glass-card jobcard-body">
         <div className="jobcard-head">
-          {/* Company monogram */}
-          <div className="jobcard-monogram">
-            {(job.company || '?').slice(0, 1).toUpperCase()}
-          </div>
+          <CompanyAvatar company={job.company} size={44} />
 
           <div className="jobcard-main">
             <div className="jobcard-titlerow">

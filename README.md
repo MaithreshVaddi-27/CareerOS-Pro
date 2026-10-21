@@ -439,7 +439,10 @@ ATS-specific paths via `COMPANY_CAREER_PAGE_PATTERNS` rather than editing code.
 **Politeness.** Concurrency is capped **per domain**, retries use exponential backoff
 with jitter, 429/5xx retry while 4xx fails immediately (a 403 will not become a 200),
 responses are cached with a TTL so repeat queries do not re-hit the site, and the
-`User-Agent` identifies the project.
+`User-Agent` identifies the project. DNS lookups run in a worker thread
+(`asyncio.to_thread`) so they never block the event loop during live fetch — this
+was the one real fix needed, since `socket.getaddrinfo` used to stall every other
+concurrent scrape on the same event loop.
 
 **Extraction.** Company, location, employment type and apply URL are read from labelled
 elements when the page provides them. What cannot be read stays empty so
@@ -449,6 +452,21 @@ elements when the page provides them. What cannot be read stays empty so
 # Scrape one company to JSON
 python -m backend.cli "Acme Corp" --location Berlin --max-concurrency 2
 ```
+
+## Frontend — company avatars (humanized picture)
+
+Job cards and the job detail modal now render a professional company picture instead
+of a single-letter monogram. `frontend/src/components/ui/CompanyAvatar.jsx`:
+
+- Renders a real logo image when `job.logoUrl` is provided, with an automatic
+  initials fallback if the image fails to load.
+- Otherwise draws a deterministic coloured initials avatar — the same company always
+  gets the same brand colour (hashed from the name), no external lookup table, no
+  broken-image boxes, no network call for the fallback.
+- `aria-label` and `title` carry the company name for accessibility.
+
+Used by `JobCard` (44px) and `JobDetail` (56px). No new dependency — it is pure
+React + inline CSS tokens already in `globals.css`.
 
 ---
 

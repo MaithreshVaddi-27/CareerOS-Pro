@@ -299,7 +299,11 @@ capped by `COMPANY_SCRAPER_MAX_URL_PROBES`.
 | Wasted requests | retry only on 429/5xx and transport errors; 4xx fails fast |
 | Re-scraping unchanged pages | TTL cache (`COMPANY_SCRAPER_CACHE_TTL_SECONDS`) |
 | Connection churn | one `httpx.AsyncClient` per scraper, reused across requests |
+| Event-loop stalls | DNS lookups run via `asyncio.to_thread(socket.getaddrinfo)` — a blocking `getaddrinfo` no longer freezes every concurrent scrape on the same loop |
 | Anonymity | configurable `User-Agent` identifying the project |
+
+Browser-like request headers (`Accept-Language`, expanded `Accept`, `Cache-Control:
+no-cache`) reduce the chance that live career pages block the scraper.
 
 ### 6.3 Extraction rules
 
@@ -331,7 +335,28 @@ until GC — a real problem in a long-lived worker.
 
 ---
 
-## 7. Extension points
+## 8. Frontend
+
+`frontend/` is a Vite + React 19 SPA. All CSS lives in `src/styles/globals.css`
+(imported by `src/App.jsx`), so styling is external to the component tree — no
+inline styles beyond component tokens like avatar size or background hue.
+
+### CompanyAvatar
+
+`src/components/ui/CompanyAvatar.jsx` renders a professional company picture:
+
+- Real logo image when `job.logoUrl` is provided, with an automatic initials
+  fallback on load error — no broken-image boxes.
+- Deterministic coloured initials avatar otherwise (same company → same brand
+  colour, hashed from the name). No external lookup table, no network call for the
+  fallback.
+- `aria-label` / `title` carry the company name.
+
+Used by `JobCard` (44px) and `JobDetail` (56px). No new dependency — pure React.
+
+---
+
+## 9. Extension points
 
 | To add… | Do this |
 |---|---|
@@ -341,7 +366,6 @@ until GC — a real problem in a long-lived worker.
 | An LLM provider | Implement `LLMProvider` in `model_router.py`, add to `_get_provider()` and the fallback chain. |
 | A table | Add to `models/`, re-export from `models/__init__.py`. `create_all()` creates it; an existing environment also needs a reviewed `CREATE TABLE`. |
 | A response field | Add to `schemas/job.py`. It propagates to the OpenAPI schema automatically. |
-
 ---
 
 ## 8. Things that look wrong but are not

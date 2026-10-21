@@ -63,20 +63,6 @@ settings = get_settings()
 _dns_cache: Dict[str, bool] = {}
 
 
-def _dns_resolves(hostname: str) -> bool:
-    """Check if a hostname resolves via DNS. Results are cached to avoid
-    repeated lookups for the same host."""
-    if hostname in _dns_cache:
-        return _dns_cache[hostname]
-    try:
-        socket.getaddrinfo(hostname, 443)
-        _dns_cache[hostname] = True
-        return True
-    except (socket.gaierror, socket.error):
-        _dns_cache[hostname] = False
-        return False
-
-
 async def _guard_request(request: httpx.Request) -> None:
     """httpx request hook: refuse any hop that is not HTTPS to a public IP.
 
@@ -87,6 +73,23 @@ async def _guard_request(request: httpx.Request) -> None:
     return value of a plain function.
     """
     assert_public_https(str(request.url))
+
+
+async def _dns_resolves(hostname: str) -> bool:
+    """Check if a hostname resolves via DNS. Results are cached to avoid
+    repeated lookups for the same host.
+
+    Runs the blocking ``socket.getaddrinfo`` in a worker thread so it never
+    stalls the asyncio event loop during live fetch."""
+    if hostname in _dns_cache:
+        return _dns_cache[hostname]
+    try:
+        await asyncio.to_thread(socket.getaddrinfo, hostname, 443)
+        _dns_cache[hostname] = True
+        return True
+    except (socket.gaierror, socket.error):
+        _dns_cache[hostname] = False
+        return False
 
 
 # Anchor text that is navigation, not a job title.
@@ -223,7 +226,9 @@ class CompanyScraper:
                 timeout=self._timeout,
                 headers={
                     "User-Agent": settings.company_scraper_user_agent,
-                    "Accept": "text/html,application/xhtml+xml",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Cache-Control": "no-cache",
                 },
                 follow_redirects=True,
                 # httpx fires the "request" hook once per hop, redirects
@@ -275,7 +280,7 @@ class CompanyScraper:
                 break
         return candidates
 
-    def _board_search_url(self, board: str, query: str, location: Optional[str]) -> Optional[str]:
+    async def _board_search_url(self, board: str, query: str, location: Optional[str]) -> Optional[str]:
         """Build a search URL for a job board, skipping boards whose template
         we cannot fill safely."""
         template = JOB_BOARD_SEARCH_PATTERNS.get(board)
@@ -293,7 +298,7 @@ class CompanyScraper:
         # DNS pre-check: skip boards whose host doesn't resolve, to avoid
         # hanging on connection timeouts.
         hostname = urlparse(url).hostname
-        if hostname and not _dns_resolves(hostname):
+        if hostname and not await _dns_resolves(hostname):
             logger.warning("board %s host %r does not resolve — skipping", board, hostname)
             return None
         return url
@@ -686,7 +691,7 @@ class CompanyScraper:
             # avoiding long connection timeouts on dead domains.
             if career_url:
                 hostname = urlparse(career_url).hostname
-                if hostname and not _dns_resolves(hostname):
+                if hostname and not await _dns_resolves(hostname):
                     logger.warning(
                         "career page host %r does not resolve — skipping %s",
                         hostname, career_url,
@@ -812,7 +817,7 @@ class CompanyScraper:
         logger.info("Searching %d job boards for %r", len(ordered_boards), query)
 
         async def _scrape_one_board(board: str) -> Tuple[str, List[RawJobPosting]]:
-            url = self._board_search_url(board, query, location)
+            url = await self._board_search_url(board, query, location)
             if not url:
                 return board, []
             html = await self._fetch_html(url)
