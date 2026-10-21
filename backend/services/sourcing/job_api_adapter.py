@@ -338,6 +338,106 @@ class ArbeitnowAdapter:
         return results
 
 
+class WorkingNomadsAdapter:
+    """workingnomads.com — free, no key, remote-first listings.
+    Server-rendered HTML — scrapes the jobs search page directly."""
+    BASE_URL = "https://www.workingnomads.com/jobs"
+
+    async def search(self, query: str, location: str | None = None) -> list[RawJobPosting]:
+        async with httpx.AsyncClient(timeout=15.0, headers={"User-Agent": "CareerOS/0.1"}) as client:
+            params = {"search": query} if query else {}
+            resp = await get_with_retry(client, self.BASE_URL, params=params)
+            resp.raise_for_status()
+            html = resp.text
+
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+
+        q_low = query.lower()
+        results = []
+        # Working Nomads lists jobs in article/card elements
+        for card in soup.select("article, .job-card, .job, li.job, div.job"):
+            text = card.get_text(separator=" ", strip=True)
+            if len(text) < 30:
+                continue
+            if q_low and q_low not in text.lower():
+                continue
+            title_el = card.find(["h3", "h2", "h4", "a"])
+            title = title_el.get_text(strip=True) if title_el else text[:80]
+            company_el = card.find(class_=lambda c: c and ("company" in c or "employer" in c))
+            company = company_el.get_text(strip=True) if company_el else ""
+            link_el = card.find("a", href=True)
+            apply_url = link_el["href"] if link_el else ""
+            if apply_url and not apply_url.startswith("http"):
+                apply_url = "https://www.workingnomads.com" + apply_url
+            location_el = card.find(class_=lambda c: c and ("location" in c or "remote" in c))
+            location_raw = location_el.get_text(strip=True) if location_el else "Remote"
+            results.append(
+                RawJobPosting(
+                    source="workingnomads",
+                    source_id=f"wn-{abs(hash(title + company + apply_url)) % 1000000}",
+                    title=title,
+                    company=company,
+                    location_raw=location_raw,
+                    employment_type_raw="",
+                    description=text[:500],
+                    apply_url=apply_url,
+                    posted_at_raw=None,
+                    salary_raw=None,
+                )
+            )
+        return results
+
+
+class JobspressoAdapter:
+    """jobspresso.co — free, no key, remote jobs. Server-rendered HTML."""
+    BASE_URL = "https://jobspresso.co/"
+
+    async def search(self, query: str, location: str | None = None) -> list[RawJobPosting]:
+        async with httpx.AsyncClient(timeout=15.0, headers={"User-Agent": "CareerOS/0.1"}) as client:
+            params = {"s": query} if query else {}
+            resp = await get_with_retry(client, self.BASE_URL, params=params)
+            resp.raise_for_status()
+            html = resp.text
+
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+
+        q_low = query.lower()
+        results = []
+        for card in soup.select("article, .job-card, .job, .post, li, .listing"):
+            text = card.get_text(separator=" ", strip=True)
+            if len(text) < 30:
+                continue
+            if q_low and q_low not in text.lower():
+                continue
+            title_el = card.find(["h3", "h2", "h4", "a"])
+            title = title_el.get_text(strip=True) if title_el else text[:80]
+            link_el = card.find("a", href=True)
+            apply_url = link_el["href"] if link_el else ""
+            if apply_url and not apply_url.startswith("http"):
+                apply_url = "https://jobspresso.co" + apply_url
+            results.append(
+                RawJobPosting(
+                    source="jobspresso",
+                    source_id=f"jp-{abs(hash(title + apply_url)) % 1000000}",
+                    title=title,
+                    company="",
+                    location_raw="Remote",
+                    employment_type_raw="",
+                    description=text[:500],
+                    apply_url=apply_url,
+                    posted_at_raw=None,
+                    salary_raw=None,
+                )
+            )
+        return results
+
+
 class MultiSourceAdapter:
     """Fans out to every configured live source, merges results. A single source
     failing (bad key, rate limit, outage) doesn't take down the others — logged
@@ -439,6 +539,10 @@ def get_adapter(sources: list[str] | None = None) -> JobSourceAdapter:
         configured.append(RemoteOKAdapter())
     if "arbeitnow" in requested:
         configured.append(ArbeitnowAdapter())
+    if "workingnomads" in requested:
+        configured.append(WorkingNomadsAdapter())
+    if "jobspresso" in requested:
+        configured.append(JobspressoAdapter())
     # company scraper — free, no key required, secondary source for broader coverage
     if "company" in requested:
         configured.append(_CompanyScraperAdapter())

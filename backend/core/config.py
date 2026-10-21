@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     adzuna_app_key: str = ""
     adzuna_country: str = "in"  # gb, us, in, etc — see Adzuna docs for supported codes
 
-    job_sources: str = "jsearch,adzuna,remotive,remoteok,arbeitnow,company"  # comma-separated, used when job_api_mode=live
+    job_sources: str = "jsearch,adzuna,remotive,remoteok,arbeitnow,workingnomads,jobspresso,company"  # comma-separated, used when job_api_mode=live
 
     gemini_api_key: str = ""
     gemini_model: str = "gemini-flash-latest"  # alias, auto-follows Google rollouts — never pin exact version
