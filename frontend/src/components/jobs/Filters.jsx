@@ -128,7 +128,10 @@ export default function Filters({ filters, onChange }) {
                     min="0"
                     step="50000"
                     value={filters.salary_min || ''}
-                    onChange={(e) => set({ salary_min: e.target.value })}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      set({ salary_min: raw === '' ? undefined : Number(raw) });
+                    }}
                     placeholder="e.g. 300000"
                   />
                 </FilterRow>
@@ -140,7 +143,10 @@ export default function Filters({ filters, onChange }) {
                     min="0"
                     step="50000"
                     value={filters.salary_max || ''}
-                    onChange={(e) => set({ salary_max: e.target.value })}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      set({ salary_max: raw === '' ? undefined : Number(raw) });
+                    }}
                     placeholder="e.g. 1200000"
                   />
                 </FilterRow>

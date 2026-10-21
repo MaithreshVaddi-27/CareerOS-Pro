@@ -153,13 +153,22 @@ def _ingest_and_filter(state: CareerOSState, db: Session, req: MatchRequest, raw
             with db.begin_nested():  # SAVEPOINT: a failure unwinds only this row
                 normalized = normalize_job(raw)
                 row, created = upsert_job(db, normalized)
-            if created:
-                client = get_client()
-                index_job(client, row.id, row.title, row.description, row.skills_required or [])
         except Exception:
             logger.exception(
-                "skipping job source=%s source_id=%s (ingest failed)", raw.source, raw.source_id
+                "skipping job source=%s source_id=%s (normalize/upsert failed)", raw.source, raw.source_id
             )
+            continue
+        # Vector index is best-effort: a Qdrant failure must NOT roll back the
+        # MySQL insert above, so indexing has its own try/except. A job that
+        # lands in MySQL but not Qdrant is still findable via SQL search.
+        if created:
+            try:
+                client = get_client()
+                index_job(client, row.id, row.title, row.description, row.skills_required or [])
+            except Exception:
+                logger.exception(
+                    "skipping vector index for job source=%s source_id=%s", raw.source, raw.source_id
+                )
     commit_batch(db)
 
     # Filter in SQL rather than loading every row: this used to be

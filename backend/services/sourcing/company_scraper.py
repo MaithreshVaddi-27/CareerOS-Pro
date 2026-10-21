@@ -658,6 +658,7 @@ class CompanyScraper:
         company_name: str,
         location: Optional[str] = None,
         custom_url: Optional[str] = None,
+        query: Optional[str] = None,
     ) -> List[RawJobPosting]:
         """Scrape job postings for one company.
 
@@ -665,6 +666,9 @@ class CompanyScraper:
             company_name: Employer name; also the source of the guessed domain.
             location: Optional case-insensitive location filter.
             custom_url: Exact career page URL; skips URL probing when given.
+            query: Optional keyword filter; only cards whose title contains the
+                query (case-insensitive substring) are returned. When None the
+                query is not applied — used for direct career-page crawling.
 
         Returns:
             Postings, de-duplicated by source_id. Empty list on any failure —
@@ -708,7 +712,7 @@ class CompanyScraper:
                 logger.info("No job cards found on %s", career_url)
                 return []
 
-            return self._build_postings(cards, company_name, career_url, location)
+            return self._build_postings(cards, company_name, career_url, location, query=query)
 
         except Exception as exc:  # network/parse boundary — never propagate
             logger.error("Unexpected error scraping career page %s: %s", career_url, exc)
@@ -720,6 +724,7 @@ class CompanyScraper:
         company_name: str,
         career_url: str,
         location: Optional[str],
+        query: Optional[str] = None,
     ) -> List[RawJobPosting]:
         results: List[RawJobPosting] = []
         seen: set[str] = set()
@@ -729,6 +734,14 @@ class CompanyScraper:
                 title = self._extract_title(card).strip()
                 if not title:
                     continue
+
+                # Keyword filter: only cards whose title contains the query
+                # (case-insensitive substring). When query is None, no filter —
+                # used for direct career-page crawling where every card counts.
+                if query:
+                    q_low = query.strip().lower()
+                    if q_low and q_low not in title.lower():
+                        continue
 
                 location_raw = self._extract_location(card).strip()
                 if not self._matches_location(location_raw, location):
@@ -891,7 +904,7 @@ class CompanyScraper:
 
         async def _scrape_one_company(company: str) -> Tuple[str, List[RawJobPosting]]:
             try:
-                postings = await self.scrape_company_jobs(company, location)
+                postings = await self.scrape_company_jobs(company, location, query=query)
                 return company, postings
             except Exception as exc:  # one dead company never kills the batch
                 logger.warning("Major tech company %s failed: %s", company, exc)
@@ -967,7 +980,7 @@ class CompanyScraper:
 
         async def _scrape_one_company(company: str) -> Tuple[str, List[RawJobPosting]]:
             try:
-                postings = await self.scrape_company_jobs(company, location)
+                postings = await self.scrape_company_jobs(company, location, query=query)
                 return company, postings
             except Exception as exc:
                 logger.warning("Startup company %s failed: %s", company, exc)

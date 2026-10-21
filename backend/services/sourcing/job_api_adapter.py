@@ -595,6 +595,7 @@ class _CompanyScraperAdapter:
                         return await scraper.scrape_company_jobs(
                             company_name=company_name,
                             location=location,
+                            query=query,
                         )
 
                 scraped = await asyncio.gather(
