@@ -32,6 +32,7 @@ import hashlib
 import logging
 import random
 import re
+import socket
 import time
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import quote, urljoin, urlparse, urlunparse
@@ -49,10 +50,31 @@ from backend.core.sources import (
     STARTUP_COMPANIES_GOOD,
     STARTUP_COMPANIES_MEDIUM,
 )
+from backend.core.sources.websites import (
+    COMPANY_CAREER_URLS,
+    JOB_BOARD_SEARCH_PATTERNS,
+)
 from backend.schemas import RawJobPosting
 
 logger = logging.getLogger("careeros")
 settings = get_settings()
+
+# Cache of DNS resolution results to avoid repeated lookups.
+_dns_cache: Dict[str, bool] = {}
+
+
+def _dns_resolves(hostname: str) -> bool:
+    """Check if a hostname resolves via DNS. Results are cached to avoid
+    repeated lookups for the same host."""
+    if hostname in _dns_cache:
+        return _dns_cache[hostname]
+    try:
+        socket.getaddrinfo(hostname, 443)
+        _dns_cache[hostname] = True
+        return True
+    except (socket.gaierror, socket.error):
+        _dns_cache[hostname] = False
+        return False
 
 
 async def _guard_request(request: httpx.Request) -> None:
@@ -95,84 +117,7 @@ _EMPLOYMENT_MARKERS = (
 # a search URL template with {query} and {location} placeholders. Boards are
 # chosen because they are free, credential-less, and tend to render server-side
 # HTML we can parse without an LLM or a headless browser.
-JOB_BOARD_SEARCH_PATTERNS: dict[str, str] = {
-    # Major job boards
-    "indeed": "https://www.indeed.com/jobs?q={query}&l={location}",
-    "glassdoor": "https://www.glassdoor.com/Job/jobs.htm?sc.keyword={query}&locT=C&locId=1&locKeyword={location}",
-    "linkedin": "https://www.linkedin.com/jobs/search/?keywords={query}&location={location}",
-    "ziprecruiter": "https://www.ziprecruiter.com/candidate/search?search={query}&location={location}",
-    "simplyhired": "https://www.simplyhired.com/search?q={query}&l={location}",
-    # Remote-first boards
-    "weworkremotely": "https://weworkremotely.com/remote-jobs/search?term={query}",
-    "wellfound": "https://wellfound.com/role/{query}",
-    "remoteok": "https://remoteok.com/remote-{query}-jobs",
-    "workingnomads": "https://www.workingnomads.com/jobs?search={query}",
-    "jobspresso": "https://jobspresso.co/?s={query}",
-    # Google Jobs aggregation (server-rendered jobs search)
-    "google_jobs": "https://www.google.com/search?q={query}+jobs&ibp=htl;jobs&hl=en&gl=us",
-    # Major tech company career pages (direct crawling targets)
-    "google_careers": "https://careers.google.com/jobs/results/?q={query}",
-    "amazon_jobs": "https://www.amazon.jobs/en/jobs?keyword={query}&location={location}",
-    "microsoft_careers": "https://careers.microsoft.com/us/en/search-results?q={query}&l={location}",
-    "apple_jobs": "https://jobs.apple.com/en-us/search?query={query}&location={location}",
-    "meta_careers": "https://www.metacareers.com/jobs/?query={query}&location={location}",
-    "netflix_jobs": "https://jobs.netflix.com/search?q={query}",
-    "uber_careers": "https://www.uber.com/global/en/careers/list/?keyword={query}&location={location}",
-    "airbnb_careers": "https://www.airbnb.com/careers/departments?query={query}&location={location}",
-    "salesforce_careers": "https://salesforce.wd1.myworkdayjobs.com/en-US/External_Career_Page?searchBarText={query}&location={location}",
-    "adobe_careers": "https://ext.adobe.com/jobs/?q={query}&l={location}",
-    "intel_careers": "https://jobs.intel.com/search?q={query}&l={location}",
-    "ibm_careers": "https://www.ibm.com/employment/search?q={query}&location={location}",
-    "oracle_careers": "https://talent.oracle.com/faces/jobs/search?q={query}&location={location}",
-    "cisco_careers": "https://jobs.cisco.com/jobs/SearchJobs/?search={query}&location={location}",
-    "nvidia_careers": "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite?q={query}&location={location}",
-    "amd_careers": "https://jobs.amd.com/search?q={query}&l={location}",
-    "qualcomm_careers": "https://qtr.avature.net/CareerCenter/Search?q={query}&location={location}",
-}
-
-# Direct career page URLs for major companies that use subdomains or
-# non-standard URL structures. These override the domain-guessing logic in
-# _base_site when scraping a specific company's career page.
-COMPANY_CAREER_URLS: dict[str, str] = {
-    "google": "https://careers.google.com/jobs/",
-    "alphabet": "https://careers.google.com/jobs/",
-    "microsoft": "https://careers.microsoft.com/us/en/search-results",
-    "apple": "https://jobs.apple.com/en-us/search",
-    "meta": "https://www.metacareers.com/jobs/",
-    "facebook": "https://www.metacareers.com/jobs/",
-    "amazon": "https://www.amazon.jobs/en/jobs",
-    "netflix": "https://jobs.netflix.com/search",
-    "uber": "https://www.uber.com/global/en/careers/list/",
-    "airbnb": "https://www.airbnb.com/careers/departments",
-    "salesforce": "https://salesforce.wd1.myworkdayjobs.com/en-US/External_Career_Page",
-    "adobe": "https://ext.adobe.com/jobs/",
-    "intel": "https://jobs.intel.com/search",
-    "ibm": "https://www.ibm.com/employment/search",
-    "oracle": "https://talent.oracle.com/faces/jobs/search",
-    "cisco": "https://jobs.cisco.com/jobs/SearchJobs/",
-    "nvidia": "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite",
-    "amd": "https://jobs.amd.com/search",
-    "qualcomm": "https://qtr.avature.net/CareerCenter/Search",
-    "paypal": "https://www.paypal.com/us/webapps/mpp/careers",
-    "ebay": "https://careers.ebay.com/",
-    "hp": "https://jobs.hp.com/",
-    "dell": "https://www.dell.com/en-us/work/dellcareers",
-    "samsung": "https://careers.samsung.com/",
-    "sony": "https://www.sony.com/en_SonyInfo/careers/",
-    "sap": "https://careers.sap.com/",
-    "vmware": "https://careers.vmware.com/",
-    "servicenow": "https://careers.servicenow.com/",
-    "workday": "https://wd5.myworkdayjob.com/workday",
-    "atlassian": "https://www.atlassian.com/company/careers",
-    "dropbox": "https://www.dropbox.com/jobs",
-    "pinterest": "https://www.pinterest.com/careers/",
-    "spotify": "https://www.lifeatspotify.com/jobs/",
-}
-
-# Major tech company career pages crawled directly when running
-# company-name-driven scraping. Board keys are loaded from backend.core.sources
-# (TECH_COMPANY_CAREER_BOARDS). The URL patterns above are keyed to match those
-# board names.
+# URL definitions live in backend.core.sources.websites.JOB_BOARD_SEARCH_PATTERNS.
 
 class CompanyScraper:
     """Scrapes job listings from company career pages AND multiple job boards.
@@ -344,6 +289,12 @@ class CompanyScraper:
             url = url.replace("{location}", "")
         if not is_public_https(url):
             logger.warning("board %s produced a non-public URL %r — skipping", board, url)
+            return None
+        # DNS pre-check: skip boards whose host doesn't resolve, to avoid
+        # hanging on connection timeouts.
+        hostname = urlparse(url).hostname
+        if hostname and not _dns_resolves(hostname):
+            logger.warning("board %s host %r does not resolve — skipping", board, hostname)
             return None
         return url
 
@@ -720,18 +671,28 @@ class CompanyScraper:
                 # Explicit URL wins even if it looks sparse — the caller asked
                 # for this page specifically.
                 career_url = custom_url.rstrip("/")
-                html = await self._fetch_html(career_url)
             else:
                 # Check direct URL mappings first (companies with subdomains or
                 # non-standard career page structures).
                 company_key = company_name.strip().lower()
                 if company_key in COMPANY_CAREER_URLS:
                     career_url = COMPANY_CAREER_URLS[company_key]
-                    html = await self._fetch_html(career_url)
                 else:
                     base = self._base_site(company_name)
-                    html, discovered = await self._fetch_first_career_page(base)
+                    _, discovered = await self._fetch_first_career_page(base)
                     career_url = discovered or self._join(base, self.CAREER_URL_PATTERNS[0])
+
+            # DNS pre-check: skip fetching if the hostname doesn't resolve,
+            # avoiding long connection timeouts on dead domains.
+            if career_url:
+                hostname = urlparse(career_url).hostname
+                if hostname and not _dns_resolves(hostname):
+                    logger.warning(
+                        "career page host %r does not resolve — skipping %s",
+                        hostname, career_url,
+                    )
+                    return []
+                html = await self._fetch_html(career_url)
 
             if not html:
                 logger.info("No career page HTML for %s (%s)", company_name, career_url)
