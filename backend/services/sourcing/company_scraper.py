@@ -1044,42 +1044,4 @@ class CompanyScraper:
         return results
 
 
-async def scrape_company_jobs(
-    company_name: str,
-    location: Optional[str] = None,
-    custom_url: Optional[str] = None,
-) -> List[RawJobPosting]:
-    """Module-level entry point used by the job-source adapter."""
-    async with CompanyScraper() as scraper:
-        return await scraper.scrape_company_jobs(company_name, location, custom_url)
 
-
-async def scrape_multiple_websites(
-    query: str,
-    location: Optional[str] = None,
-    boards: Optional[List[str]] = None,
-) -> List[RawJobPosting]:
-    """Module-level entry point for multi-website job board search."""
-    async with CompanyScraper() as scraper:
-        return await scraper.scrape_multiple_websites(query, location, boards)
-
-
-async def scrape_major_tech_companies(
-    query: str,
-    location: Optional[str] = None,
-    companies: Optional[List[str]] = None,
-) -> List[RawJobPosting]:
-    """Module-level entry point for major tech company career page crawling."""
-    async with CompanyScraper() as scraper:
-        return await scraper.scrape_major_tech_companies(query, location, companies)
-
-
-async def scrape_startup_companies(
-    query: str,
-    location: Optional[str] = None,
-    stage: str = "all",
-    companies: Optional[List[str]] = None,
-) -> List[RawJobPosting]:
-    """Module-level entry point for startup company career page crawling by stage."""
-    async with CompanyScraper() as scraper:
-        return await scraper.scrape_startup_companies(query, location, stage, companies)

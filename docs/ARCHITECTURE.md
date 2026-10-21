@@ -325,9 +325,9 @@ async with CompanyScraper() as scraper:
     postings = await scraper.scrape_company_jobs("Acme Corp")
 ```
 
-The module-level `scrape_company_jobs()` wrapper does this for you. If you construct a
-scraper directly and do not close it, connections leak until GC — a real problem in a
-long-lived worker.
+Use `async with CompanyScraper() as scraper` (shown above) so its HTTP client is
+closed on exit. Constructing a scraper directly and not closing it leaks connections
+until GC — a real problem in a long-lived worker.
 
 ---
 
