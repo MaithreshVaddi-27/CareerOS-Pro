@@ -116,7 +116,7 @@ JOB_BOARD_SEARCH_PATTERNS: dict[str, str] = {
     "microsoft_careers": "https://careers.microsoft.com/us/en/search-results?q={query}&l={location}",
     "apple_jobs": "https://jobs.apple.com/en-us/search?query={query}&location={location}",
     "meta_careers": "https://www.metacareers.com/jobs/?query={query}&location={location}",
-    "netflix_jobs": "https://jobs.netflix.com/search?q={query}&location={location}",
+    "netflix_jobs": "https://jobs.netflix.com/search?q={query}",
     "uber_careers": "https://www.uber.com/global/en/careers/list/?keyword={query}&location={location}",
     "airbnb_careers": "https://www.airbnb.com/careers/departments?query={query}&location={location}",
     "salesforce_careers": "https://salesforce.wd1.myworkdayjobs.com/en-US/External_Career_Page?searchBarText={query}&location={location}",
@@ -128,6 +128,45 @@ JOB_BOARD_SEARCH_PATTERNS: dict[str, str] = {
     "nvidia_careers": "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite?q={query}&location={location}",
     "amd_careers": "https://jobs.amd.com/search?q={query}&l={location}",
     "qualcomm_careers": "https://qtr.avature.net/CareerCenter/Search?q={query}&location={location}",
+}
+
+# Direct career page URLs for major companies that use subdomains or
+# non-standard URL structures. These override the domain-guessing logic in
+# _base_site when scraping a specific company's career page.
+COMPANY_CAREER_URLS: dict[str, str] = {
+    "google": "https://careers.google.com/jobs/",
+    "alphabet": "https://careers.google.com/jobs/",
+    "microsoft": "https://careers.microsoft.com/us/en/search-results",
+    "apple": "https://jobs.apple.com/en-us/search",
+    "meta": "https://www.metacareers.com/jobs/",
+    "facebook": "https://www.metacareers.com/jobs/",
+    "amazon": "https://www.amazon.jobs/en/jobs",
+    "netflix": "https://jobs.netflix.com/search",
+    "uber": "https://www.uber.com/global/en/careers/list/",
+    "airbnb": "https://www.airbnb.com/careers/departments",
+    "salesforce": "https://salesforce.wd1.myworkdayjobs.com/en-US/External_Career_Page",
+    "adobe": "https://ext.adobe.com/jobs/",
+    "intel": "https://jobs.intel.com/search",
+    "ibm": "https://www.ibm.com/employment/search",
+    "oracle": "https://talent.oracle.com/faces/jobs/search",
+    "cisco": "https://jobs.cisco.com/jobs/SearchJobs/",
+    "nvidia": "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite",
+    "amd": "https://jobs.amd.com/search",
+    "qualcomm": "https://qtr.avature.net/CareerCenter/Search",
+    "paypal": "https://www.paypal.com/us/webapps/mpp/careers",
+    "ebay": "https://careers.ebay.com/",
+    "hp": "https://jobs.hp.com/",
+    "dell": "https://www.dell.com/en-us/work/dellcareers",
+    "samsung": "https://careers.samsung.com/",
+    "sony": "https://www.sony.com/en_SonyInfo/careers/",
+    "sap": "https://careers.sap.com/",
+    "vmware": "https://careers.vmware.com/",
+    "servicenow": "https://careers.servicenow.com/",
+    "workday": "https://wd5.myworkdayjob.com/workday",
+    "atlassian": "https://www.atlassian.com/company/careers",
+    "dropbox": "https://www.dropbox.com/jobs",
+    "pinterest": "https://www.pinterest.com/careers/",
+    "spotify": "https://www.lifeatspotify.com/jobs/",
 }
 
 # Major tech company career pages crawled directly when running
@@ -683,9 +722,16 @@ class CompanyScraper:
                 career_url = custom_url.rstrip("/")
                 html = await self._fetch_html(career_url)
             else:
-                base = self._base_site(company_name)
-                html, discovered = await self._fetch_first_career_page(base)
-                career_url = discovered or self._join(base, self.CAREER_URL_PATTERNS[0])
+                # Check direct URL mappings first (companies with subdomains or
+                # non-standard career page structures).
+                company_key = company_name.strip().lower()
+                if company_key in COMPANY_CAREER_URLS:
+                    career_url = COMPANY_CAREER_URLS[company_key]
+                    html = await self._fetch_html(career_url)
+                else:
+                    base = self._base_site(company_name)
+                    html, discovered = await self._fetch_first_career_page(base)
+                    career_url = discovered or self._join(base, self.CAREER_URL_PATTERNS[0])
 
             if not html:
                 logger.info("No career page HTML for %s (%s)", company_name, career_url)
