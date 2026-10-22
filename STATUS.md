@@ -177,3 +177,17 @@ logs and continues without rolling back the MySQL insert).
 - Cleaned untracked caches: `.pytest_cache/`, `.ruff_cache/`,
   `frontend/dist/`, `qdrant_local/`, `.DS_Store` files (all were already
   gitignored).
+
+## Scraper live-fetch fix (this session)
+
+- Live browser testing against Apple (`jobs.apple.com`) and Google
+  (`careers.google.com`) careers pages revealed the scraper returned **0 jobs**
+  from both: `JOB_CARD_SELECTORS` only matched `article`/`li`/card-div patterns,
+  and the fallback only checked `<li>`/`<article>`. Real pages use
+  `<h3><a href="/details/...">` (Apple) and `<div class="HG3T4e">` (Google).
+- Added `a[href*='/details/']`, `a[href*='/jobs/']`, `a[href*='/job/']`,
+  `a[href*='/careers/']`, `h2`, `h3` to `JOB_CARD_SELECTORS`.
+- Fixed `_extract_title` and `_extract_apply_url` to handle the card being the
+  anchor element itself (not just containing one).
+- Verified against real Apple HTML: all 3 job cards extract with correct titles
+  and apply URLs.

@@ -149,6 +149,10 @@ class CompanyScraper:
     ]
 
     # Ordered by specificity — first selector with usable cards wins.
+    # Real career pages vary wildly: Apple uses <h3><a href="/details/...">,
+    # Google uses <div class="HG3T4e">, Workday/Greenhouse use article.job or
+    # li[data-job-id]. We therefore also match <a> tags whose href looks like a
+    # job-detail page, and <h2>/<h3> headings that wrap such links.
     JOB_CARD_SELECTORS = [
         "article.job",
         "li[data-job-id]",
@@ -176,6 +180,14 @@ class CompanyScraper:
         ".position-card",
         ".career-item",
         ".job-block",
+        # Apple-style: <h3><a href="/details/..."> — match the anchor itself
+        "a[href*='/details/']",
+        "a[href*='/jobs/']",
+        "a[href*='/job/']",
+        "a[href*='/careers/']",
+        # Fallback containers that commonly wrap job links.
+        "h3",
+        "h2",
     ]
 
     def __init__(
@@ -497,9 +509,10 @@ class CompanyScraper:
             if cards:
                 return cards
 
-        # Fallback: any list item / article whose text looks like a role.
+        # Fallback: any element whose text looks like a role. Includes <a>/<h2>/<h3>
+        # because Apple-style pages put job links directly in those tags.
         fallback = []
-        for element in soup.find_all(["li", "article"]):
+        for element in soup.find_all(["li", "article", "a", "h2", "h3"]):
             text = element.get_text(separator=" ", strip=True).lower()
             if len(text) > 30 and any(
                 kw in text
@@ -516,6 +529,11 @@ class CompanyScraper:
                 title = el.get_text(strip=True)
                 if title:
                     return title
+        # Card itself may be the anchor (Apple-style: <a href="/details/...">).
+        if card.name == "a" and card.has_attr("href"):
+            text = card.get_text(strip=True)
+            if 2 < len(text) < 100 and not any(x in text.lower() for x in _NAV_WORDS):
+                return text
         for a in card.find_all("a", href=True):
             text = a.get_text(strip=True)
             if 2 < len(text) < 100 and not any(x in text.lower() for x in _NAV_WORDS):
@@ -597,6 +615,10 @@ class CompanyScraper:
         Only links *inside* the card are considered — walking up to a sibling
         card's anchor is how postings used to get each other's URLs.
         """
+        # Card itself may be the anchor (Apple-style: <a href="/details/...">).
+        if card.name == "a" and card.has_attr("href"):
+            return urljoin(base_url, card["href"].strip())
+
         for a in card.find_all("a", href=True):
             href = a["href"].strip()
             text = a.get_text(strip=True).lower()
