@@ -12,6 +12,8 @@ Two modes:
 2. Multi-website job board search (new): given a query + location, fan out
    across several job boards in parallel, extract cards from each, and return
    an aggregated de-duplicated list of findings.
+3. Dynamic URL scrape (new): given any direct URL, scrape job cards from it
+   with no company-name guessing or URL probing.
 
 Shape of a run (company page):
     1. resolve the career URL (explicit, or probed from known patterns)
@@ -23,6 +25,10 @@ Shape of a run (multi-website):
     2. fetch each board concurrently (per-domain semaphore + robots.txt)
     3. extract cards from each board, normalise board-specific fields
     4. de-duplicate across boards by source_id and return the list
+
+Shape of a run (dynamic URL):
+    1. fetch the exact URL with per-domain concurrency, bounded retry, TTL cache
+    2. extract cards, then per-card fields, filtering by location if given
 """
 
 from __future__ import annotations
@@ -93,7 +99,16 @@ async def _dns_resolves(hostname: str) -> bool:
 
 
 # Anchor text that is navigation, not a job title.
-_NAV_WORDS = ("apply", "read more", "skip", "home", "learn more", "view job", "details")
+_NAV_WORDS = (
+    "apply", "read more", "skip", "home", "learn more", "view job", "details",
+    "see full", "full role", "role description", "job description",
+)
+
+# Additional title-level reject patterns (compiled for speed).
+_TITLE_REJECT_RE = re.compile(
+    r"(see full|full role|role description|job description|click here|apply now)",
+    re.I,
+)
 
 # Class names that commonly hold the employer name on a card.
 _COMPANY_CLASS_RE = re.compile(r"company|employer|org(?:anisation|anization)?", re.I)
@@ -116,11 +131,23 @@ _EMPLOYMENT_MARKERS = (
     "contract",
 )
 
-# Job boards we search across when running multi-website search. Each entry is
-# a search URL template with {query} and {location} placeholders. Boards are
-# chosen because they are free, credential-less, and tend to render server-side
-# HTML we can parse without an LLM or a headless browser.
-# URL definitions live in backend.core.sources.websites.JOB_BOARD_SEARCH_PATTERNS.
+
+def _looks_like_employment(text: str) -> bool:
+    """Return True if the text is an employment-type label rather than a place."""
+    if not text:
+        return True
+    low = text.strip().lower()
+    if not low:
+        return True
+    markers = (
+        "full", "part", "time", "contract", "intern", "seasonal", "temporary",
+        "temp", "hire", "remote", "onsite", "on-site", "in office", "hybrid",
+        "volunteer", "freelance", "per diem",
+    )
+    # Split on both spaces and hyphens so "full-time" -> {"full", "time"}.
+    words = set(re.split(r"[\s\-]+", low))
+    return bool(words & set(markers))
+
 
 class CompanyScraper:
     """Scrapes job listings from company career pages AND multiple job boards.
@@ -554,6 +581,16 @@ class CompanyScraper:
                 text = el.get_text(strip=True)
                 if 1 < len(text) < 80:
                     return text
+
+        # Anchor-card pattern (Apple): company is in a sibling of the heading
+        # that wraps the <a>. Look at the parent's following siblings.
+        if card.name == "a":
+            parent = card.parent
+            if parent is not None:
+                for sib in parent.find_next_siblings():
+                    sib_text = sib.get_text(separator=" ", strip=True)
+                    if sib_text and 1 < len(sib_text) < 80 and not _looks_like_employment(sib_text):
+                        return sib_text
         return ""
 
     @staticmethod
@@ -563,21 +600,41 @@ class CompanyScraper:
             el = card.select_one(selector)
             if el:
                 text = el.get_text(strip=True)
-                if text:
+                if text and not _looks_like_employment(text):
                     return text
 
         text = card.get_text(separator=" ", strip=True)
         # Parenthesised form wins — it is the most common explicit marker.
-        paren = re.search(r"\(([^)]{2,60})\)", text)
-        if paren:
-            candidate = paren.group(1).strip()
-            if not any(w in candidate.lower() for w in ("full", "part", "contract", "intern")):
-                return candidate
+        # Skip for anchor cards (Apple-style) since parens in the card text are
+        # part of the title, not a location.
+        if card.name != "a":
+            paren = re.search(r"\(([^)]{2,60})\)", text)
+            if paren:
+                candidate = paren.group(1).strip()
+                if not _looks_like_employment(candidate):
+                    return candidate
 
-        # "City, ST" — run against the *original* casing, never a lowercased copy.
-        city = _CITY_REGION_RE.search(text)
-        if city:
-            return city.group(0).strip()
+        # For anchor cards (Apple-style), the card text is just the title — don't
+        # run the city regex on it. For container cards, the title is part of the
+        # text, so only trust the regex if it finds a real "City, ST" pattern that
+        # isn't the whole text.
+        if card.name != "a":
+            city = _CITY_REGION_RE.search(text)
+            if city:
+                candidate = city.group(0).strip()
+                if not _looks_like_employment(candidate) and candidate != text.strip():
+                    return candidate
+
+        # Anchor-card pattern (Apple): location is in a sibling of the heading
+        # that wraps the <a>. Require a real "City, ST" pattern (not just any comma,
+        # which would match dates like "Oct 22, 2026").
+        if card.name == "a":
+            parent = card.parent
+            if parent is not None:
+                for sib in parent.find_next_siblings():
+                    sib_text = sib.get_text(separator=" ", strip=True)
+                    if sib_text and _CITY_REGION_RE.search(sib_text) and not _looks_like_employment(sib_text):
+                        return sib_text
         return ""
 
     @staticmethod
@@ -672,6 +729,59 @@ class CompanyScraper:
         return wanted.strip().lower() in location_raw.lower()
 
     # -------------------------------------------------------------------------
+    # Quality gates (quality over quantity)
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def _is_valid_job_title(title: str) -> bool:
+        """Return True only if the title looks like a real job role.
+
+        Rejects nav/footer noise ("Apply", "Read more", "Skip", "Home", ...),
+        single-word or single-letter titles, and anything that looks like a
+        generic link label rather than a position. This is the quality gate
+        that keeps junk out of the results even when a page has dozens of
+        non-job anchors."""
+        if not title:
+            return False
+        t = title.strip()
+        if len(t) < 3 or len(t) > 120:
+            return False
+        low = t.lower()
+        # Nav / boilerplate words are never job titles.
+        if any(w in low for w in _NAV_WORDS):
+            return False
+        # Reject titles matching description/click/apply boilerplate phrases.
+        if _TITLE_REJECT_RE.search(low):
+            return False
+        # Reject pure numbers or single-token noise ("Apply", "Jobs", "View").
+        if low in {"apply", "apply now", "jobs", "job", "view", "details", "read more", "learn more", "home", "skip"}:
+            return False
+        # Must contain at least one letter.
+        if not any(ch.isalpha() for ch in t):
+            return False
+        return True
+
+    @staticmethod
+    def _is_valid_apply_url(url: str) -> bool:
+        """Return True only if the URL looks like a real job detail/apply page.
+
+        Rejects mailto:, tel:, javascript:, anchor-only links, and URLs that
+        point at generic site sections rather than a specific posting."""
+        if not url:
+            return False
+        low = url.lower()
+        if low.startswith(("mailto:", "tel:", "javascript:", "#")):
+            return False
+        if "#" in low and low.split("#")[0].rstrip("/") in ("", "/"):
+            return False
+        parsed = urlparse(url)
+        if not parsed.scheme or not parsed.netloc:
+            return False
+        if not is_public_https(url):
+            return False
+        return True
+
+    # -------------------------------------------------------------------------
     # Public API — single company career page (existing)
     # -------------------------------------------------------------------------
 
@@ -740,6 +850,62 @@ class CompanyScraper:
             logger.error("Unexpected error scraping career page %s: %s", career_url, exc)
             return []
 
+    async def scrape_url(
+        self,
+        url: str,
+        location: Optional[str] = None,
+        query: Optional[str] = None,
+        company_name: Optional[str] = None,
+    ) -> List[RawJobPosting]:
+        """Scrape job postings from any direct URL.
+
+        Dynamic entry point — no company-name guessing, no URL probing. The
+        caller supplies an exact URL (a careers page, a job board search
+        results page, a Greenhouse/Lever board, etc.) and the scraper fetches
+        it, extracts job cards, and returns normalized postings. This is the
+        path used when a user pastes a specific URL or when an upstream
+        component has already resolved a target.
+
+        Args:
+            url: Exact page URL to scrape. Must be public HTTPS.
+            location: Optional case-insensitive location filter.
+            query: Optional keyword filter on the job title.
+            company_name: Optional employer name override. When omitted the
+                domain is used as a best-effort company label.
+
+        Returns:
+            Postings, de-duplicated by source_id. Empty list on any failure —
+            a scrape is best-effort enrichment, never a hard dependency.
+        """
+        try:
+            if not url or not is_public_https(url):
+                logger.warning("scrape_url: refusing non-public https URL %r", url)
+                return []
+
+            # DNS pre-check.
+            hostname = urlparse(url).hostname or ""
+            if hostname and not await _dns_resolves(hostname):
+                logger.warning("scrape_url: host %r does not resolve — skipping %s", hostname, url)
+                return []
+
+            html = await self._fetch_html(url)
+            if not html:
+                logger.info("scrape_url: no HTML for %s", url)
+                return []
+
+            cards = self._extract_job_cards(html)
+            if not cards:
+                logger.info("scrape_url: no job cards found on %s", url)
+                return []
+
+            # Derive a company label from the domain when none is given.
+            label = company_name or hostname or "Unknown"
+            return self._build_postings(cards, label, url.rstrip("/"), location, query=query)
+
+        except Exception as exc:  # network/parse boundary — never propagate
+            logger.error("Unexpected error scraping URL %s: %s", url, exc)
+            return []
+
     def _build_postings(
         self,
         cards: List[BeautifulSoup],
@@ -754,7 +920,7 @@ class CompanyScraper:
         for idx, card in enumerate(cards):
             try:
                 title = self._extract_title(card).strip()
-                if not title:
+                if not title or not self._is_valid_job_title(title):
                     continue
 
                 # Keyword filter: only cards whose title contains the query
@@ -771,9 +937,11 @@ class CompanyScraper:
 
                 company = self._extract_company(card).strip() or company_name
                 apply_url = self._extract_apply_url(card, career_url)
-                if not apply_url:
-                    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-") or "job"
-                    apply_url = f"{career_url.rstrip('/')}/job/{slug}-{idx}"
+                # Quality gate: require a real, fetchable apply URL. A posting
+                # with no link to act on is not actionable — skip it rather
+                # than synthesizing a fake URL that leads nowhere.
+                if not apply_url or not self._is_valid_apply_url(apply_url):
+                    continue
 
                 source_id = self._compute_source_id(title, company, location_raw, apply_url)
                 if source_id in seen:
@@ -1082,6 +1250,3 @@ class CompanyScraper:
         if results:
             logger.info("Board %s yielded %d jobs", board, len(results))
         return results
-
-
-

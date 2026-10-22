@@ -575,10 +575,28 @@ class _CompanyScraperAdapter:
     async def search(self, query: str, location: str | None = None) -> list[RawJobPosting]:
         """Scrape companies named in the query, or fan out across job boards.
 
-        Scraping is best-effort enrichment. A query naming a company scrapes that
-        company's career page; a query with no company searches multiple job
-        boards and returns an aggregated list of findings.
+        Scraping is best-effort enrichment. The query can be one of:
+
+        * an explicit URL — ``https://jobs.apple.com/en-us/search`` — scraped
+          directly via :meth:`CompanyScraper.scrape_url` (dynamic entry point,
+          no company-name guessing);
+        * ``company:<name>`` — scrapes that company's career page;
+        * a free-text query — infers company names, or fans out across job
+          boards when none are found.
         """
+        from urllib.parse import urlparse
+
+        # Dynamic URL entry point: the caller supplied a concrete page to
+        # scrape. No company-name inference, no probing — fetch it directly.
+        stripped = query.strip()
+        if stripped and urlparse(stripped).scheme in ("http", "https"):
+            async with CompanyScraper() as scraper:
+                return await scraper.scrape_url(
+                    url=stripped,
+                    location=location,
+                    query=None,
+                )
+
         explicit = re.match(r"^\s*company\s*:\s*(.+)$", query, re.I)
         candidates = (
             [explicit.group(1).strip()]

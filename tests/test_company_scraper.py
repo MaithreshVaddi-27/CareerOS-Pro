@@ -153,7 +153,8 @@ def test_contract_to_hire_maps_to_contract(scraper):
     from backend.services.sourcing.normalize import normalize_job
 
     html = ('<li class="job-card"><h3>Engineer</h3>'
-            '<p>Contract-to-hire, six month engagement with Python work.</p></li>')
+            '<p>Contract-to-hire, six month engagement with Python work.</p>'
+            '<a href="/jobs/engineer-1">Apply</a></li>')
     card = CompanyScraper._extract_job_cards(html)[0]
     raw = CompanyScraper._extract_employment_type(card)
     assert raw == "contract-to-hire"
@@ -184,10 +185,12 @@ def test_distinct_cards_get_distinct_urls_and_source_ids(scraper):
     <ul class="job-listings">
       <li class="job-card"><h3>Data Scientist</h3>
         <div class="location">Remote</div>
-        <p>Build forecasting models across the analytics stack.</p></li>
+        <p>Build forecasting models across the analytics stack.</p>
+        <a href="/jobs/data-scientist">Apply</a></li>
       <li class="job-card"><h3>Data Analyst</h3>
         <div class="location">Remote</div>
-        <p>Own reporting dashboards and stakeholder reporting.</p></li>
+        <p>Own reporting dashboards and stakeholder reporting.</p>
+        <a href="/jobs/data-analyst">Apply</a></li>
     </ul>
     """
     postings = scraper._build_postings(
