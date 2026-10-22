@@ -12,12 +12,12 @@ cp .env.example .env
 
 ## Required
 
-The app **refuses to start** without these. There is deliberately no default.
+The application requires a MySQL password setting and an API key setting to exist, but an empty API key deliberately disables API-key authentication in development. Production deployments should configure a non-empty key. Frontend builds expose any `VITE_API_KEY` in browser assets, so it is only a shared access token, not user authentication.
 
 | Variable | Why |
 |---|---|
 | `MYSQL_PASSWORD` | Database credential. `resolved_database_url` raises without it. |
-| `API_KEY` | Enables the `X-API-Key` gate. Unset means the API is **open**. |
+| `API_KEY` | Empty = open access; non-empty enables the `X-API-Key` gate. Set a non-empty value when the API must reject callers without the shared key. |
 
 ---
 
@@ -46,7 +46,7 @@ password are safe.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `API_KEY` | *(required)* | Sent as `X-API-Key`. |
+| `API_KEY` | *(empty in local template)* | Sent as `X-API-Key` when non-empty; production startup requires a value. |
 | `RATE_LIMIT_PER_MINUTE` | `60` | `0` or negative disables limiting. `< 10` and `> 1000` log a startup warning. |
 | `REDIS_URL` | *(empty)* | Shared rate-limit counters. Empty = per-process counters. |
 | `ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:3000,…` | Comma-separated CORS origins. |
@@ -152,13 +152,13 @@ The most commonly tuned block. Scraping is free — no credential involved.
 | Variable | Default | Notes |
 |---|---|---|
 | `COMPANY_CAREER_PAGE_PATTERNS` | *(empty)* | Comma-separated paths probed under the company domain, **highest priority first**. Add ATS-specific paths here instead of editing code. |
-| `COMPANY_SCRAPER_MAX_URL_PROBES` | `4` | Upper bound on paths probed per company. |
-| `COMPANY_SCRAPER_CACHE_SIZE` | `100` | Cached HTML pages held in memory. FIFO eviction. |
+| `COMPANY_SCRAPER_MAX_URL_PROBES` | `8` | Upper bound on paths probed per company. |
+| `COMPANY_SCRAPER_CACHE_SIZE` | `200` | Cached HTML pages held in memory. FIFO eviction. |
 | `COMPANY_SCRAPER_CACHE_TTL_SECONDS` | `900` | Cache lifetime. Prevents returning a stale job list. `0` disables expiry. |
-| `COMPANY_SCRAPER_MAX_CONCURRENCY` | `5` | Concurrent requests **per hostname**. |
+| `COMPANY_SCRAPER_MAX_CONCURRENCY` | `20` | Concurrent requests **per hostname**. |
 | `COMPANY_SCRAPER_JITTER_MAX` | `0.5` | Max random jitter added to retry backoff. |
 | `COMPANY_SCRAPER_TIMEOUT_SECONDS` | `20` | Per-request HTTP timeout. |
-| `COMPANY_SCRAPER_MAX_RETRIES` | `2` | Retries *after* the first attempt. |
+| `COMPANY_SCRAPER_MAX_RETRIES` | `3` | Retries *after* the first attempt. |
 | `COMPANY_SCRAPER_USER_AGENT` | `CareerOS/1.0 (+…/CareerOS-Pro)` | Identify yourself to the sites you scrape. |
 
 ### How URL discovery behaves

@@ -2,26 +2,38 @@
 
 ## Setup
 
+Prerequisites: Python 3.12, Node.js 20+, and MySQL 8.x. From the repository root:
+
 ```bash
 git clone https://github.com/MaithreshVaddi-27/CareerOS-Pro.git
 cd CareerOS-Pro
+cp .env.example .env
 python -m venv backend/venv && source backend/venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-dev.txt
 pip install "ruff==0.17.1"          # pinned — see "Why the pin" below
+python -c "from backend.core.db import create_all; create_all()"
 ```
 
-Set `MYSQL_PASSWORD` and `API_KEY` in `.env` (see [CONFIGURATION.md](CONFIGURATION.md)).
+Set `MYSQL_PASSWORD` if required by your local database. `API_KEY` may remain empty for local development; see [CONFIGURATION.md](CONFIGURATION.md).
 
-## The loop
+Frontend setup, from `frontend/`:
 
 ```bash
-ruff check backend/ tests/            # backend lint
-ruff check backend/ tests/ --fix      # autofix (imports, safe rewrites)
-python -m pytest -v                   # backend suite
-cd frontend
-npx oxlint --deny correctness src/    # frontend lint
-npm run build                         # frontend has no test suite
+cp .env.example .env
+npm ci
 ```
+
+## Commands
+
+| Command | Description |
+|---|---|
+| `python backend/run.py` | Start the API at `127.0.0.1:8000` |
+| `ruff check backend/ tests/` | Lint backend and tests |
+| `python -m pytest -v` | Run backend tests |
+| `npm run dev` | Start Vite development server (from `frontend/`) |
+| `npx --no-install oxlint --deny correctness src/` | Run the CI Oxlint gate (from `frontend/`) |
+| `npm run build` | Build frontend assets (from `frontend/`) |
+| `npm run preview` | Preview built assets (from `frontend/`) |
 
 Schema changes are the one thing you cannot skip:
 

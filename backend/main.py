@@ -343,17 +343,27 @@ def _ingest_filter_and_select(db: Session, req: SearchRequest, raw_postings: lis
     # be *stricter* — silently dropping a boundary row the Python predicate would
     # have kept, which is exactly what the superset contract forbids.
     now = datetime.now(timezone.utc)
-    candidate_jobs = db.execute(
-        select(Job)
-        .where(*build_sql_filters(req, now=now))
-        .order_by(
-            Job.posted_at.is_(None), Job.posted_at.desc(), Job.created_at.desc(), Job.id.desc()
-        )
-        .offset(req.offset)
-        .limit(req.limit)
-    ).scalars().all()
-
-    filtered = apply_hard_filters(candidate_jobs, req, now=now)
+    page_end = req.offset + req.limit
+    filtered = []
+    candidate_offset = 0
+    batch_size = 500
+    while len(filtered) < page_end:
+        candidate_jobs = db.execute(
+            select(Job)
+            .where(*build_sql_filters(req, now=now))
+            .order_by(
+                Job.posted_at.is_(None), Job.posted_at.desc(), Job.created_at.desc(), Job.id.desc()
+            )
+            .offset(candidate_offset)
+            .limit(batch_size)
+        ).scalars().all()
+        if not candidate_jobs:
+            break
+        filtered.extend(apply_hard_filters(candidate_jobs, req, now=now))
+        candidate_offset += len(candidate_jobs)
+        if len(candidate_jobs) < batch_size:
+            break
+    filtered = filtered[req.offset : page_end]
     # Materialise BEFORE rollback — after it, every attribute access is a SELECT.
     out = [JobOut.model_validate(job) for job in filtered]
     # Read-only tail: hand the pooled connection back before the response is

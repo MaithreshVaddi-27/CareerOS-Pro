@@ -185,16 +185,27 @@ def _ingest_and_filter(state: CareerOSState, db: Session, req: MatchRequest, raw
     # main._ingest_filter_and_select. Separate instants let the SQL pass be
     # stricter than the Python one, which breaks the superset contract.
     now = datetime.now(timezone.utc)
-    candidates = db.execute(
-        select(Job)
-        .where(*build_sql_filters(search_req, now=now))
-        .order_by(
-            Job.posted_at.is_(None), Job.posted_at.desc(), Job.created_at.desc(), Job.id.desc()
-        )
-        .offset(req.offset)
-        .limit(req.top_k * _CANDIDATE_OVERSAMPLE)
-    ).scalars().all()
-    filtered = apply_hard_filters(candidates, search_req, now=now)
+    candidate_limit = req.offset + req.top_k * _CANDIDATE_OVERSAMPLE
+    batch_size = 500
+    filtered = []
+    candidate_offset = 0
+    while len(filtered) < candidate_limit:
+        candidates = db.execute(
+            select(Job)
+            .where(*build_sql_filters(search_req, now=now))
+            .order_by(
+                Job.posted_at.is_(None), Job.posted_at.desc(), Job.created_at.desc(), Job.id.desc()
+            )
+            .offset(candidate_offset)
+            .limit(batch_size)
+        ).scalars().all()
+        if not candidates:
+            break
+        filtered.extend(apply_hard_filters(candidates, search_req, now=now))
+        candidate_offset += len(candidates)
+        if len(candidates) < batch_size:
+            break
+    filtered = filtered[req.offset : candidate_limit]
     # Read ids out BEFORE the rollback — touching `j.id` after it would re-SELECT.
     state["candidate_ids"] = [j.id for j in filtered]
     # Release the pooled connection before the LLM fan-out. Without this the

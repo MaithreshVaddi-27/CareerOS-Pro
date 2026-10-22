@@ -123,11 +123,11 @@ cd CareerOS-Pro
 cp .env.example .env
 ```
 
-Two values have **no defaults** and the app refuses to start without them:
+Set the database password for your local MySQL installation. `API_KEY` may be left empty for local development; set it when you want the API-key gate enabled. In production, a non-empty `API_KEY` is required. The browser frontend's `VITE_API_KEY` is visible in its built assets and is only a shared access token, not user authentication.
 
 ```dotenv
 MYSQL_PASSWORD=your-password
-API_KEY=choose-a-long-random-string
+API_KEY=
 ```
 
 > MySQL 8.x only. MySQL 9.x disallows MD5 in generated columns, which breaks the
@@ -145,7 +145,7 @@ pip install -r requirements.txt
 # MySQL 8.x must already be running and reachable on MYSQL_HOST.
 # See docs/DEPLOYMENT.md § Local development for the create-user SQL.
 python -c "from backend.core.db import create_all; create_all()"  # create the schema
-python run.py                            # → http://127.0.0.1:8000
+python backend/run.py                    # → http://127.0.0.1:8000
 ```
 
 > The app runs **no DDL at startup** — create tables from the SQLAlchemy models
@@ -166,9 +166,9 @@ Set `VITE_API_BASE=http://127.0.0.1:8000` in `frontend/.env`.
 ### Production
 
 Native host deployment — no container runtime. Run with `python backend/run.py`
-(or uvicorn directly) behind nginx or any reverse proxy. `run.py` exits non-zero
-when `APP_ENV=production` and `API_KEY` is empty, so a misconfigured deploy
-fails loudly rather than serving open traffic.
+(or uvicorn directly) behind nginx or any reverse proxy. The application refuses
+production startup when `APP_ENV=production` and `API_KEY` is empty, so a
+misconfigured deploy fails loudly rather than serving open traffic.
 
 ```bash
 source backend/venv/bin/activate
@@ -230,12 +230,12 @@ tuned:
 | Variable | Default | Purpose |
 |---|---|---|
 | `COMPANY_CAREER_PAGE_PATTERNS` | *(empty)* | Extra career paths to probe, highest priority first. Use it to teach a new ATS layout **without touching code**. |
-| `COMPANY_SCRAPER_MAX_URL_PROBES` | `4` | How many paths are probed per company. |
-| `COMPANY_SCRAPER_CACHE_SIZE` | `100` | Cached HTML pages held in memory. |
+| `COMPANY_SCRAPER_MAX_URL_PROBES` | `8` | How many paths are probed per company. |
+| `COMPANY_SCRAPER_CACHE_SIZE` | `200` | Cached HTML pages held in memory. |
 | `COMPANY_SCRAPER_CACHE_TTL_SECONDS` | `900` | Cache lifetime. `0` disables expiry. |
-| `COMPANY_SCRAPER_MAX_CONCURRENCY` | `5` | Concurrent requests **per domain** — keeps us polite. |
+| `COMPANY_SCRAPER_MAX_CONCURRENCY` | `20` | Concurrent requests **per domain** — keeps us polite. |
 | `COMPANY_SCRAPER_TIMEOUT_SECONDS` | `20` | Per-request HTTP timeout. |
-| `COMPANY_SCRAPER_MAX_RETRIES` | `2` | Retries *after* the first attempt. 4xx never retries. |
+| `COMPANY_SCRAPER_MAX_RETRIES` | `3` | Retries *after* the first attempt. 4xx never retries. |
 | `COMPANY_SCRAPER_USER_AGENT` | `CareerOS/1.0 …` | Identify yourself to the sites you scrape. |
 
 Full reference: **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)**.
@@ -379,7 +379,10 @@ extension points, and the design decisions behind the layout.
 ## Job sources
 
 Enable via the comma-separated `JOB_SOURCES` variable. All fan out concurrently;
-a failing source degrades to an empty result and never fails the request.
+a failing source degrades to an empty result and never fails the request. Available
+career-page scraper board URL templates are maintained in
+[`backend/core/sources/websites.py`](backend/core/sources/websites.py); some sites may
+block automated requests or require JavaScript, so scraper coverage varies.
 
 | Source | Credential | Notes |
 |---|---|---|
@@ -481,22 +484,18 @@ React + inline CSS tokens already in `globals.css`.
 
 ```bash
 source backend/venv/bin/activate
-pip install "ruff==0.17.1"
-
 ruff check backend/ tests/       # lint
-ruff check backend/ tests/ --fix
-python -m pytest -v                      # tests
+python -m pytest -v             # backend tests
 
+cd frontend
+npx --no-install oxlint --deny correctness src/  # Oxlint (CI gate)
+npm run build                   # production build
 ```
 
-Ruff is **pinned in CI on purpose**. Its default rule set changed drastically in 0.17,
-so an unpinned `pip install ruff` makes CI pass or fail based on whatever the runner
-resolved that day. The rule set is pinned in `pyproject.toml`; pytest config lives in
-`pytest.ini` (which takes precedence, so it is not duplicated).
+Ruff is pinned in CI (`.github/workflows/ci.yml`) and its rule set is configured in
+`pyproject.toml`. Pytest configuration lives in `pytest.ini`.
 
-The frontend has no test suite — `npm run build` is the available signal.
-
-Workflow, conventions and the review checklist: **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)**.
+Workflow, setup commands and the review checklist: **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)**.
 
 ---
 

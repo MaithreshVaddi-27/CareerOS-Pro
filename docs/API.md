@@ -13,8 +13,7 @@ Every route except `/health`, `/health/ready` and the framework docs requires:
 X-API-Key: <API_KEY>
 ```
 
-`API_KEY` has no default. With it unset the gate is **open** — intended for local
-development only.
+An empty `API_KEY` leaves the gate **open**, which is the local-development default. Production startup rejects an empty key. If the bundled browser frontend sends `VITE_API_KEY`, remember it is visible in the frontend assets and provides no user identity or authorization.
 
 A missing or wrong key returns **401** with a message naming the header. The bundled
 frontend needs `VITE_API_KEY` set to the same value or it will 401 on every call.

@@ -2,12 +2,14 @@
 
 Deep audit register. Bugs are tracked per phase with **Status**, **Upgrade**, and **Degradation** columns. Companion to `docs/API.md`, `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`, and `docs/CONFIGURATION.md`.
 
-## Verification baseline (green)
+## Verification baseline
 
-- `ruff check backend/ tests/`: clean
-- `pytest`: 321 passed, 1 skipped
-- `oxlint` (frontend): clean
-- `npm run build`: 433 modules, ~108 kB gzip
+Historical baseline from the last recorded full verification; it is not a claim about the current working tree. Validate current changes with the commands in `docs/CONTRIBUTING.md` and CI before release.
+
+- `ruff check backend/ tests/`: clean at the recorded baseline
+- `pytest`: 321 passed, 1 skipped at the recorded baseline
+- `oxlint` (frontend): clean at the recorded baseline
+- `npm run build`: 433 modules, ~108 kB gzip at the recorded baseline
 
 ---
 

@@ -545,8 +545,43 @@ class CompanyScraper:
                 kw in text
                 for kw in ("engineer", "developer", "manager", "director", "intern", "analyst", "designer")
             ):
-                fallback.append(element)
+                # Only include elements that look like real job titles,
+                # not page headings like "Search jobs" or "Locations".
+                if CompanyScraper._looks_like_job_title(element.get_text(separator=" ", strip=True)):
+                    fallback.append(element)
         return fallback
+
+    @staticmethod
+    def _looks_like_job_title(text: str) -> bool:
+        """Return True if the text looks like a real job title, not a page heading."""
+        if not text:
+            return False
+        t = text.strip()
+        low = t.lower()
+        words = low.split()
+        if not words:
+            return False
+        # Exclude generic page heading words.
+        page_heading_words = {
+            "search", "sidebar", "locations", "experience", "skills", "qualifications",
+            "degree", "job", "types", "organisations", "sort", "jobs", "results",
+            "home", "about", "contact", "privacy", "terms", "help", "blog", "press",
+            "investor", "store", "shop", "account", "cart", "checkout",
+        }
+        if len(words) <= 2 and all(w in page_heading_words for w in words):
+            return False
+        # Accept short, recognized job titles such as "Engineer"; longer titles
+        # need not use a fixed vocabulary.
+        job_keywords = (
+            "engineer", "developer", "manager", "analyst", "designer", "director",
+            "specialist", "consultant", "lead", "architect", "administrator",
+            "technician", "coordinator", "representative", "officer", "associate",
+            "executive", "supervisor", "president", "scientist", "researcher",
+            "programmer", "operator", "assistant", "clerk", "accountant",
+            "sales", "marketing", "recruiter", "sourcer", "head", "intern",
+            "internship", "fellow", "apprentice", "trainee",
+        )
+        return len(t) >= 15 or any(kw in low for kw in job_keywords)
 
     @staticmethod
     def _extract_title(card: BeautifulSoup) -> str:
@@ -554,16 +589,16 @@ class CompanyScraper:
             el = card.find(tag)
             if el:
                 title = el.get_text(strip=True)
-                if title:
+                if title and CompanyScraper._looks_like_job_title(title):
                     return title
         # Card itself may be the anchor (Apple-style: <a href="/details/...">).
         if card.name == "a" and card.has_attr("href"):
             text = card.get_text(strip=True)
-            if 2 < len(text) < 100 and not any(x in text.lower() for x in _NAV_WORDS):
+            if CompanyScraper._looks_like_job_title(text):
                 return text
         for a in card.find_all("a", href=True):
             text = a.get_text(strip=True)
-            if 2 < len(text) < 100 and not any(x in text.lower() for x in _NAV_WORDS):
+            if CompanyScraper._looks_like_job_title(text):
                 return text
         return ""
 
@@ -591,6 +626,13 @@ class CompanyScraper:
                     sib_text = sib.get_text(separator=" ", strip=True)
                     if sib_text and 1 < len(sib_text) < 80 and not _looks_like_employment(sib_text):
                         return sib_text
+
+        # Google pattern: company is a plain text sibling of the <h3> title.
+        if card.name == "h3":
+            for sib in card.find_next_siblings():
+                sib_text = sib.get_text(separator=" ", strip=True)
+                if sib_text and 1 < len(sib_text) < 80 and not _looks_like_employment(sib_text):
+                    return sib_text
         return ""
 
     @staticmethod
@@ -635,6 +677,13 @@ class CompanyScraper:
                     sib_text = sib.get_text(separator=" ", strip=True)
                     if sib_text and _CITY_REGION_RE.search(sib_text) and not _looks_like_employment(sib_text):
                         return sib_text
+
+        # Google pattern: location is a plain text sibling of the <h3> title.
+        if card.name == "h3":
+            for sib in card.find_next_siblings():
+                sib_text = sib.get_text(separator=" ", strip=True)
+                if sib_text and _CITY_REGION_RE.search(sib_text) and not _looks_like_employment(sib_text):
+                    return sib_text
         return ""
 
     @staticmethod
@@ -671,25 +720,63 @@ class CompanyScraper:
         different roles on the same career page cannot collide on ``url_hash``.
         Only links *inside* the card are considered — walking up to a sibling
         card's anchor is how postings used to get each other's URLs.
+
+        Supports both ``<a href="...">`` (Apple, most boards) and
+        ``<link url="...">`` (Google Careers) link elements.
         """
         # Card itself may be the anchor (Apple-style: <a href="/details/...">).
         if card.name == "a" and card.has_attr("href"):
-            return urljoin(base_url, card["href"].strip())
+            href = urljoin(base_url, card["href"].strip())
+            if CompanyScraper._is_valid_job_url(href):
+                return href
+
+        # Google Careers uses <link url="..."> for job detail URLs. The link
+        # is a sibling of the <h3> title card, not inside it.
+        if card.name == "h3":
+            link = card.find_next_sibling("link", url=True)
+            if link:
+                href = urljoin(base_url, link.get("url", "").strip())
+                if CompanyScraper._is_valid_job_url(href):
+                    return href
+
+        link = card.find("link", url=True)
+        if link:
+            href = urljoin(base_url, link.get("url", "").strip())
+            if CompanyScraper._is_valid_job_url(href):
+                return href
 
         for a in card.find_all("a", href=True):
             href = a["href"].strip()
             text = a.get_text(strip=True).lower()
-            is_apply = "apply" in text or href.lower().startswith(
-                ("/apply", "/jobs/apply", "mailto:", "https://jobs.")
-            )
-            if is_apply:
-                return urljoin(base_url, href)
+            is_apply = "apply" in text or href.lower().startswith(("/apply", "/jobs/apply"))
+            resolved = urljoin(base_url, href)
+            if is_apply and CompanyScraper._is_valid_job_url(resolved):
+                return resolved
 
         # No explicit apply link: any in-card link is the detail page.
         links = card.find_all("a", href=True)
         if links:
-            return urljoin(base_url, links[0]["href"].strip())
+            href = urljoin(base_url, links[0]["href"].strip())
+            if CompanyScraper._is_valid_job_url(href):
+                return href
         return None
+
+    @staticmethod
+    def _is_valid_job_url(url: str) -> bool:
+        """Return True if the URL looks like a real job detail page.
+
+        Google and some boards use <link url="..."> elements for job URLs.
+        Reject generic site URLs like /jobs/, /careers/, /.
+        """
+        if not url or not CompanyScraper._is_valid_apply_url(url):
+            return False
+        parsed = urlparse(url)
+        if parsed.path.lower().endswith((".js", ".css", ".png", ".jpg", ".svg")):
+            return False
+        # Reject only generic career landing pages; ATS vendors use varied
+        # detail paths such as /acme/123, not just /jobs/<id>.
+        path = urlparse(url).path.rstrip("/").lower()
+        return path not in ("", "/", "/job", "/jobs", "/careers")
 
     @staticmethod
     def _extract_board_company(card: BeautifulSoup, board: str) -> str:
@@ -923,12 +1010,12 @@ class CompanyScraper:
                 if not title or not self._is_valid_job_title(title):
                     continue
 
-                # Keyword filter: only cards whose title contains the query
-                # (case-insensitive substring). When query is None, no filter —
-                # used for direct career-page crawling where every card counts.
+                # Match all query terms in the title so reordered or
+                # punctuation-separated titles remain discoverable.
                 if query:
-                    q_low = query.strip().lower()
-                    if q_low and q_low not in title.lower():
+                    query_terms = re.findall(r"[a-z0-9]+", query.lower())
+                    title_terms = set(re.findall(r"[a-z0-9]+", title.lower()))
+                    if query_terms and not all(term in title_terms for term in query_terms):
                         continue
 
                 location_raw = self._extract_location(card).strip()
@@ -937,9 +1024,8 @@ class CompanyScraper:
 
                 company = self._extract_company(card).strip() or company_name
                 apply_url = self._extract_apply_url(card, career_url)
-                # Quality gate: require a real, fetchable apply URL. A posting
-                # with no link to act on is not actionable — skip it rather
-                # than synthesizing a fake URL that leads nowhere.
+                # A posting without a real application URL is not actionable;
+                # never invent a URL that will be shown as an Apply link.
                 if not apply_url or not self._is_valid_apply_url(apply_url):
                     continue
 
@@ -1221,9 +1307,8 @@ class CompanyScraper:
 
                 company = self._extract_board_company(card, board).strip() or board.title()
                 apply_url = self._extract_apply_url(card, base_url)
-                if not apply_url:
-                    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-") or "job"
-                    apply_url = f"{base_url.rstrip('/')}/job/{slug}-{idx}"
+                if not apply_url or not self._is_valid_apply_url(apply_url):
+                    continue
 
                 source_id = self._compute_source_id(title, company, location_raw, apply_url)
                 if source_id in seen:

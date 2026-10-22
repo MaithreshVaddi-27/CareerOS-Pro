@@ -97,6 +97,26 @@ def _patch_fetch(scraper, pages, calls):
 # ---------------------------------------------------------------------------
 
 
+def test_title_gate_accepts_short_roles_and_rejects_generic_headings():
+    assert CompanyScraper._looks_like_job_title("Engineer")
+    assert CompanyScraper._looks_like_job_title("Senior Product Designer")
+    assert not CompanyScraper._looks_like_job_title("Search jobs")
+    assert not CompanyScraper._looks_like_job_title("Locations")
+
+
+def test_query_matches_title_terms_without_requiring_phrase_order(scraper):
+    cards = CompanyScraper._extract_job_cards(CAREER_HTML)
+    postings = scraper._build_postings(
+        cards, "Acme", "https://acme.com/careers", None, query="backend engineer"
+    )
+    assert [posting.title for posting in postings] == ["Senior Backend Engineer"]
+
+
+def test_job_url_rejects_generic_job_board_root():
+    assert not CompanyScraper._is_valid_job_url("https://snap.com/job")
+    assert CompanyScraper._is_valid_job_url("https://snap.com/job/software-engineer")
+
+
 def test_company_falls_back_to_requested_name_not_card_text(scraper):
     """Regression: the old extractor dumped the entire card text into
     `company`, poisoning every downstream field."""

@@ -65,6 +65,33 @@ def test_upsert_job_deduplication():
         assert mock_find_duplicate.call_count == 2  # Called twice total
 
 
+def test_upsert_reactivates_a_reappearing_job():
+    from backend.services.sourcing.normalize import normalize_job
+
+    mock_db = Mock(spec=Session)
+    existing = Mock(spec=Job)
+    existing.is_active = False
+    existing.verified = True
+    existing.verified_at = object()
+
+    with patch("backend.services.sourcing.dedup.find_duplicate", return_value=existing):
+        posting = RawJobPosting(
+            source="test",
+            source_id="job-reappeared",
+            title="Software Engineer",
+            company="Acme Corp",
+            apply_url="https://example.com/job/reappeared",
+        )
+        row, created = upsert_job(mock_db, normalize_job(posting))
+
+    assert row is existing
+    assert not created
+    assert existing.is_active is True
+    assert existing.verified is False
+    assert existing.verified_at is None
+    mock_db.flush.assert_called_once()
+
+
 def test_upsert_job_no_duplicate():
     """Test that different jobs are not considered duplicates."""
     # Create a mock database session

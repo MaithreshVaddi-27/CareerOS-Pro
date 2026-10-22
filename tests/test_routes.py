@@ -215,6 +215,32 @@ def test_search_honours_limit(client, no_adapters):
     assert len(r.json()) == 2
 
 
+def test_search_fills_page_after_python_narrowing(client, no_adapters, session):
+    no_adapters()
+    session.add_all(
+        [
+            _job(
+                id="a" * 32,
+                location_raw="Kyiv, Ukraine",
+                location_normalized="Kyiv, Ukraine",
+                posted_at=NOW + dt.timedelta(days=1),
+            ),
+            _job(
+                id="b" * 32,
+                location_raw="London, United Kingdom",
+                location_normalized="London, United Kingdom",
+            ),
+        ]
+    )
+    session.commit()
+
+    response = client.post("/jobs/search", json={"location": "uk", "limit": 1}, headers=AUTH)
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["location_normalized"] == "London, United Kingdom"
+
+
 def test_search_offset_walks_pages(client, no_adapters):
     no_adapters()
     page1 = client.post("/jobs/search", json={"limit": 2, "offset": 0}, headers=AUTH).json()

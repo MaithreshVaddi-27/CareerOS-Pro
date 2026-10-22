@@ -33,6 +33,11 @@ def upsert_job(db: Session, job: NormalizedJob) -> tuple[Job, bool]:
     """Insert if new, else return existing (no silent overwrite of verified data). Returns (row, created)."""
     dup = find_duplicate(db, job)
     if dup:
+        if not dup.is_active:
+            dup.is_active = True
+            dup.verified = False
+            dup.verified_at = None
+            db.flush()
         return dup, False
 
     row = Job(

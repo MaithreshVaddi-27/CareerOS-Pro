@@ -181,6 +181,39 @@ def test_match_rejects_unauthenticated(client):
     assert client.post("/jobs/match", json={"query": "python"}).status_code == 401
 
 
+def test_match_applies_offset_after_python_narrowing(session):
+    from backend import graph as graph_mod
+    from backend.schemas import MatchRequest
+
+    session.add_all(
+        [
+            _job(
+                id="a" * 32,
+                location_raw="Kyiv, Ukraine",
+                location_normalized="Kyiv, Ukraine",
+                posted_at=NOW + dt.timedelta(days=1),
+            ),
+            _job(
+                id="b" * 32,
+                location_raw="London, United Kingdom",
+                location_normalized="London, United Kingdom",
+                posted_at=NOW,
+            ),
+        ]
+    )
+    session.commit()
+    state = {"request": {}, "candidate_ids": []}
+
+    graph_mod._ingest_and_filter(
+        state,
+        session,
+        MatchRequest(query="python", location="uk", top_k=1, offset=0),
+        [],
+    )
+
+    assert state["candidate_ids"] == ["b" * 32]
+
+
 def test_no_eligible_candidates_yields_an_empty_result_not_an_error(session):
     """A filter stage that matches nothing is a normal outcome.
 

@@ -32,12 +32,14 @@ cd CareerOS-Pro
 cp .env.example .env
 ```
 
-Set the two required values:
+Set the database password for your local MySQL installation. `API_KEY` can be left empty in development; setting it enables the shared API-key gate. Production startup requires a non-empty value.
 
 ```dotenv
 MYSQL_PASSWORD=your-password
-API_KEY=choose-a-long-random-string
+API_KEY=
 ```
+
+The browser frontend embeds its configured `VITE_API_KEY` in the JavaScript bundle, so treat it as a shared quota/access token, not user authentication. Do not use this mechanism for private per-user data.
 
 ### 2. Backend
 
@@ -46,7 +48,7 @@ python -m venv backend/venv
 source backend/venv/bin/activate
 pip install -r requirements.txt
 python -c "from backend.core.db import create_all; create_all()"          # create the schema
-python run.py
+python backend/run.py
 ```
 
 `run.py` loads `.env` from the project root, fixes `sys.path`, and starts uvicorn on
@@ -72,7 +74,7 @@ python run.py
 Optional flags:
 
 ```bash
-python run.py --host 0.0.0.0 --port 8080 --reload --workers 4
+python backend/run.py --host 0.0.0.0 --port 8080 --reload --workers 4
 ```
 
 > `--workers > 1` makes rate limiting per-process — each worker keeps its own
@@ -106,7 +108,7 @@ python -c "from backend.core.db import create_all; create_all()"
 Fold it into the restart so the app never serves against an old schema:
 
 ```bash
-python -c "from backend.core.db import create_all; create_all()" && python run.py
+python -c "from backend.core.db import create_all; create_all()" && python backend/run.py
 ```
 
 ### 4. Frontend
@@ -204,9 +206,9 @@ enforce N× the intended limit — and embedded Qdrant takes a directory lock th
 one process can hold, so a second worker fails to start.
 
 ```bash
-python run.py --host 127.0.0.1 --port 8000 --workers 1
+python backend/run.py --host 127.0.0.1 --port 8000 --workers 1
 # or, with shared counters AND a real Qdrant server:
-REDIS_URL=redis://127.0.0.1:6379/0 python run.py --host 127.0.0.1 --port 8000 --workers 4
+REDIS_URL=redis://127.0.0.1:6379/0 python backend/run.py --host 127.0.0.1 --port 8000 --workers 4
 ```
 
 Bind to `127.0.0.1`, not `0.0.0.0` — the reverse proxy is the only thing that
@@ -214,7 +216,7 @@ should reach the API.
 
 ### Running as a service
 
-Run `python run.py` under your process supervisor (systemd, supervisord, etc.)
+Run `python backend/run.py` under your process supervisor (systemd, supervisord, etc.)
 as a non-root user. Set `EnvironmentFile=/srv/careeros/.env` so the same `.env`
 drives local development and production — change the path if you install
 elsewhere.
@@ -300,9 +302,7 @@ Both commands must run from the repo root with the backend virtualenv active.
 ## Troubleshooting
 
 **`ValidationError` on startup / `MYSQL_PASSWORD` missing**
-`MYSQL_PASSWORD` and `API_KEY` have no defaults. Check `.env` exists in the project
-root and that both are set. `run.py` reads `.env` before importing `config`, but
-`python -m backend.cli` does not — export the variables or use `python run.py`.
+`MYSQL_PASSWORD` must be set for the database connection. `API_KEY` may be empty in development, but production startup refuses an empty value. Check `.env` exists in the project root. `backend/run.py` loads `.env` before importing config; `python -m backend.cli` does not, so export the variables or use `python backend/run.py`.
 
 **`Data too long for column 'source_id'`**
 The live table predates a widened model column. `create_all()` creates missing
