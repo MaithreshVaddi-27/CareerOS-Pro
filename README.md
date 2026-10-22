@@ -165,13 +165,20 @@ Set `VITE_API_BASE=http://127.0.0.1:8000` in `frontend/.env`.
 
 ### Production
 
-Native host deployment — no container runtime. `deploy/` holds a hardened systemd
-unit and a ready nginx site config; see [`deploy/README.md`](deploy/README.md).
+Native host deployment — no container runtime. Run with `python backend/run.py`
+(or uvicorn directly) behind nginx or any reverse proxy. `run.py` exits non-zero
+when `APP_ENV=production` and `API_KEY` is empty, so a misconfigured deploy
+fails loudly rather than serving open traffic.
 
 ```bash
-sudo cp deploy/careeros-api.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now careeros-api
+source backend/venv/bin/activate
+python backend/run.py --host 127.0.0.1 --port 8000
 ```
+
+Bind to `127.0.0.1`, not `0.0.0.0` — the proxy is the only thing that should
+reach the API. Rate limiting keys on client IP, so forward `X-Forwarded-For`
+from the proxy; otherwise every request looks like it came from one address.
+Forward the `X-API-Key` header too.
 
 Qdrant needs no install: with `QDRANT_URL` empty the client opens an embedded
 on-disk store at `./qdrant_local`. Redis is optional and only needed for shared

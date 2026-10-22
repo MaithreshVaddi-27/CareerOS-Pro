@@ -1,8 +1,8 @@
 # Deployment
 
 Local development and production, both running natively on the host — no
-container runtime. Ready-to-install unit files are in [`deploy/`](../deploy/README.md).
-See [CONFIGURATION.md](CONFIGURATION.md) for what each variable does.
+container runtime. See [CONFIGURATION.md](CONFIGURATION.md) for what each
+variable does.
 
 ---
 
@@ -209,32 +209,28 @@ python run.py --host 127.0.0.1 --port 8000 --workers 1
 REDIS_URL=redis://127.0.0.1:6379/0 python run.py --host 127.0.0.1 --port 8000 --workers 4
 ```
 
-Bind to `127.0.0.1`, not `0.0.0.0` — nginx is the only thing that should reach the
-API. `careeros-api.service` does this already.
+Bind to `127.0.0.1`, not `0.0.0.0` — the reverse proxy is the only thing that
+should reach the API.
 
 ### Running as a service
 
-[`deploy/careeros-api.service`](../deploy/careeros-api.service) is a hardened unit:
-non-root, `ProtectSystem=strict`, a seccomp-style syscall and address-family
-allowlist, and `ReadWritePaths` granting write access to nothing but the Qdrant
-store and the virtualenv. Full install steps are in
-[`deploy/README.md`](../deploy/README.md).
+Run `python run.py` under your process supervisor (systemd, supervisord, etc.)
+as a non-root user. Set `EnvironmentFile=/srv/careeros/.env` so the same `.env`
+drives local development and production — change the path if you install
+elsewhere.
 
-It sets `EnvironmentFile=/srv/careeros/.env`, so the same `.env` drives local
-development and production — change the path if you install elsewhere.
-
-Because `run.py` exits non-zero when `APP_ENV=production` and `API_KEY` is empty, a
-misconfigured production deploy fails loudly into a visible restart loop rather
-than quietly serving open traffic.
+Because `run.py` exits non-zero when `APP_ENV=production` and `API_KEY` is
+empty, a misconfigured production deploy fails loudly into a visible restart
+loop rather than quietly serving open traffic.
 
 ### Behind a reverse proxy
 
-[`deploy/nginx-careeros.conf`](../deploy/nginx-careeros.conf) is a complete
-working config. The two things that are easy to get wrong:
+Use any reverse proxy (nginx, Caddy, Traefik). The two things that are easy to
+get wrong:
 
 **Trust the proxy.** Rate limiting keys on client IP. Without
-`X-Forwarded-For` every request appears to come from nginx, so all clients share
-one bucket and you get unexplained `429`s.
+`X-Forwarded-For` every request appears to come from the proxy, so all clients
+share one bucket and you get unexplained `429`s.
 
 **Forward the API key.** It arrives as a header, so the default `proxy_pass` is
 sufficient — do not strip it, and do not add a `proxy_set_header` for it.

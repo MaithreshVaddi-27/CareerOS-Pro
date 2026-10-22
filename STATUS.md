@@ -165,3 +165,15 @@ logs and continues without rolling back the MySQL insert).
 2. **C2** — Numeric salary inputs in `Filters.jsx`.
 3. **C3** — Decouple Qdrant index failure from MySQL insert in `graph.py`.
 4. Re-run: `pytest tests/`, `ruff check backend/ tests/`, `npx oxlint`, `npx vite build`.
+
+---
+
+## Deep clean (this session)
+
+- Removed `deploy/` (systemd unit, nginx config, deploy README) — tracked files
+  deleted with `git rm -r deploy/`; all references in README.md and
+  docs/DEPLOYMENT.md updated to point at `python backend/run.py` and generic
+  reverse-proxy guidance instead.
+- Cleaned untracked caches: `.pytest_cache/`, `.ruff_cache/`,
+  `frontend/dist/`, `qdrant_local/`, `.DS_Store` files (all were already
+  gitignored).
