@@ -294,6 +294,8 @@ def passes_hard_filters(job: Job, req: SearchRequest, now: datetime | None = Non
         # superset guarantee for a row sitting on the boundary, and costing a
         # syscall per candidate.
         reference = now or datetime.now(timezone.utc)
+        if reference.tzinfo is None:
+            reference = reference.replace(tzinfo=timezone.utc)
         cutoff = reference - timedelta(days=req.posted_within_days)
         posted = job.posted_at if job.posted_at.tzinfo else job.posted_at.replace(tzinfo=timezone.utc)
         if posted < cutoff:

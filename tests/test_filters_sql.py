@@ -62,6 +62,7 @@ FIXTURES = [
     _job(id="01", location_normalized="London, United Kingdom", location_raw="London, UK",
          employment_type="full_time", experience_level="senior", salary_max=120000,
          posted_at=NOW.replace(tzinfo=None) - dt.timedelta(days=2)),
+    _job(id="boundary", posted_at=NOW.replace(tzinfo=None) - dt.timedelta(days=7)),
     _job(id="02", location_normalized="New York, NY", location_raw="New York, NY",
          employment_type="full_time", experience_level="mid", remote="hybrid",
          salary_max=None, posted_at=None),
@@ -135,7 +136,7 @@ def test_sql_prefilter_never_excludes_a_python_match(session, req):
     If SQL is narrower, `/jobs/match` silently loses eligible jobs.
     """
     everything = session.execute(sa.select(Job)).scalars().all()
-    python_ids = {j.id for j in apply_hard_filters(everything, req)}
+    python_ids = {j.id for j in apply_hard_filters(everything, req, now=NOW)}
 
     sql_ids = set(session.execute(sa.select(Job).where(*build_sql_filters(req, now=NOW))).scalars().all())
     sql_ids = {j.id for j in sql_ids}
@@ -176,7 +177,7 @@ def test_sql_and_python_agree_exactly(session, req):
         pytest.skip(f"declared SQL over-match for location={req.location!r}")
 
     everything = session.execute(sa.select(Job)).scalars().all()
-    python_ids = {j.id for j in apply_hard_filters(everything, req)}
+    python_ids = {j.id for j in apply_hard_filters(everything, req, now=NOW)}
     sql_ids = {j.id for j in session.execute(sa.select(Job).where(*build_sql_filters(req, now=NOW))).scalars().all()}
 
     assert sql_ids == python_ids, (
@@ -190,7 +191,7 @@ def test_declared_overmatch_is_still_a_superset(session):
     """The declared over-match must stay over-matching, not become narrower."""
     req = SearchRequest(location="ny")
     everything = session.execute(sa.select(Job)).scalars().all()
-    python_ids = {j.id for j in apply_hard_filters(everything, req)}
+    python_ids = {j.id for j in apply_hard_filters(everything, req, now=NOW)}
     sql_ids = {j.id for j in session.execute(sa.select(Job).where(*build_sql_filters(req, now=NOW))).scalars().all()}
     assert python_ids <= sql_ids
     assert sql_ids - python_ids, "if this no longer over-matches, drop it from KNOWN_SQL_OVERMATCH_NEEDLES"
@@ -228,7 +229,7 @@ def test_india_agrees_between_sql_and_python(session):
     for needle in ("india", "in", "bengaluru", "telangana"):
         req = SearchRequest(location=needle)
         everything = session.execute(sa.select(Job)).scalars().all()
-        python_ids = {j.id for j in apply_hard_filters(everything, req)}
+        python_ids = {j.id for j in apply_hard_filters(everything, req, now=NOW)}
         sql_ids = {j.id for j in session.execute(sa.select(Job).where(*build_sql_filters(req, now=NOW))).scalars().all()}
         # Never narrower than Python, whatever the needle.
         assert python_ids <= sql_ids, f"SQL narrowed location={needle!r}"
@@ -240,7 +241,7 @@ def test_remote_job_matches_any_location_filter(session):
     """The remote escape hatch must survive the SQL translation."""
     everything = session.execute(sa.select(Job)).scalars().all()
     req = SearchRequest(location="atlantis")
-    python_ids = {j.id for j in apply_hard_filters(everything, req)}
+    python_ids = {j.id for j in apply_hard_filters(everything, req, now=NOW)}
     sql_ids = {j.id for j in session.execute(sa.select(Job).where(*build_sql_filters(req, now=NOW))).scalars().all()}
     assert "03" in python_ids and "03" in sql_ids
 
@@ -249,7 +250,7 @@ def test_like_metacharacters_are_escaped(session):
     """`query='100%'` must match the literal text, not act as a wildcard."""
     everything = session.execute(sa.select(Job)).scalars().all()
     req = SearchRequest(query="100%")
-    python_ids = {j.id for j in apply_hard_filters(everything, req)}
+    python_ids = {j.id for j in apply_hard_filters(everything, req, now=NOW)}
     sql_ids = {j.id for j in session.execute(sa.select(Job).where(*build_sql_filters(req, now=NOW))).scalars().all()}
     assert "07" in python_ids
     assert sql_ids == python_ids
@@ -260,4 +261,4 @@ def test_inactive_rows_always_excluded(session):
     req = SearchRequest()
     sql_ids = {j.id for j in session.execute(sa.select(Job).where(*build_sql_filters(req, now=NOW))).scalars().all()}
     assert "05" not in sql_ids, "is_active=False row leaked through"
-    assert "05" not in {j.id for j in apply_hard_filters(everything, req)}
+    assert "05" not in {j.id for j in apply_hard_filters(everything, req, now=NOW)}
