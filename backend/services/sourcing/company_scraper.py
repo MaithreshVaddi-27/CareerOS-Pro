@@ -895,6 +895,7 @@ class CompanyScraper:
         """
         try:
             career_url: Optional[str] = None
+            html: Optional[str] = None
             if custom_url:
                 # Explicit URL wins even if it looks sparse — the caller asked
                 # for this page specifically.
@@ -907,7 +908,7 @@ class CompanyScraper:
                     career_url = COMPANY_CAREER_URLS[company_key]
                 else:
                     base = self._base_site(company_name)
-                    _, discovered = await self._fetch_first_career_page(base)
+                    html, discovered = await self._fetch_first_career_page(base)
                     career_url = discovered or self._join(base, self.CAREER_URL_PATTERNS[0])
 
             # DNS pre-check: skip fetching if the hostname doesn't resolve,
@@ -920,7 +921,8 @@ class CompanyScraper:
                         hostname, career_url,
                     )
                     return []
-                html = await self._fetch_html(career_url)
+                if html is None:
+                    html = await self._fetch_html(career_url)
 
             if not html:
                 logger.info("No career page HTML for %s (%s)", company_name, career_url)

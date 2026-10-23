@@ -274,8 +274,14 @@ def test_explicit_custom_url_skips_probing():
     assert len(out) == 2
 
 
-def test_probing_falls_through_to_a_later_pattern():
+def test_probing_falls_through_to_a_later_pattern(monkeypatch):
     """The point of discovery: /careers 404s, /jobs works."""
+    import backend.services.sourcing.company_scraper as scraper_module
+
+    async def resolves(_hostname):
+        return True
+
+    monkeypatch.setattr(scraper_module, "_dns_resolves", resolves)
     calls = []
 
     async def fake(url):
@@ -290,6 +296,7 @@ def test_probing_falls_through_to_a_later_pattern():
     assert len(out) == 2
     assert all(p.apply_url.startswith("https://acme.com/jobs/") for p in out)
     assert "https://acme.com/careers" in calls
+    assert calls.count("https://acme.com/jobs") == 1
 
 
 def test_probing_skips_a_page_with_no_job_listings():
