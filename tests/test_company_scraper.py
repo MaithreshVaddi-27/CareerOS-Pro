@@ -663,6 +663,30 @@ def _install_board_transport(scraper, pages):
     return original
 
 
+def test_weworkremotely_section_jobs_extracts_job_not_promoted_ad():
+    html = '''<section class="jobs">
+      <ul>
+        <li class="new-listing-container feature">
+          <a href="/company/acme">Company profile</a>
+          <a class="listing-link--unlocked" href="/remote-jobs/acme-backend-intern">
+            <h3>Backend Engineering Intern</h3>
+          </a>
+        </li>
+        <li class="new-listing-container listing-ad">
+          <a class="listing-ad-url listing-ad-url--main" href="/listing_ads/13/click?target=profile">
+            <h3>Customer Support Specialist</h3>
+          </a>
+        </li>
+      </ul>
+    </section>'''
+    cards = CompanyScraper._extract_job_cards(html)
+    assert len(cards) == 1
+    assert CompanyScraper._extract_title(cards[0]) == "Backend Engineering Intern"
+    assert CompanyScraper._extract_apply_url(cards[0], "https://weworkremotely.com") == (
+        "https://weworkremotely.com/remote-jobs/acme-backend-intern"
+    )
+
+
 def test_multi_website_search_aggregates_across_boards(scraper):
     """Multiple boards are fanned out and results are combined into one list."""
     pages = {

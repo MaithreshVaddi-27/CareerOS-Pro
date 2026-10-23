@@ -62,6 +62,8 @@ export default function Filters({ filters, onChange }) {
                     return (
                       <motion.button
                         key={src}
+                        type="button"
+                        aria-pressed={active}
                         onClick={() => {
                           const list = filters.sources || [];
                           set({ sources: active ? list.filter((s) => s !== src) : [...list, src] });
@@ -123,6 +125,7 @@ export default function Filters({ filters, onChange }) {
                 <FilterRow label="Min salary (₹/yr)" stacked htmlFor="salary-min">
                   <input
                     id="salary-min"
+                    name="salary_min"
                     className="input"
                     type="number"
                     min="0"
@@ -138,6 +141,7 @@ export default function Filters({ filters, onChange }) {
                 <FilterRow label="Max salary (₹/yr)" stacked htmlFor="salary-max">
                   <input
                     id="salary-max"
+                    name="salary_max"
                     className="input"
                     type="number"
                     min="0"

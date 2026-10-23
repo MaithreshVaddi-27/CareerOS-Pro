@@ -189,9 +189,9 @@ class CompanyScraper:
         ".position-list li",
         ".jobs-list li",
         ".job-listings li",
-        ".job-listings li",
         ".opening-list li",
         "#jobs .job",
+        "section.jobs li.new-listing-container:not(.listing-ad)",
         ".css-1n4p8mf",
         ".css-1q2qfg6",
         ".job-listing",
@@ -752,6 +752,14 @@ class CompanyScraper:
             resolved = urljoin(base_url, href)
             if is_apply and CompanyScraper._is_valid_job_url(resolved):
                 return resolved
+
+        # Prefer the link containing the job title; cards may also link to a
+        # company profile before the actual posting (e.g. We Work Remotely).
+        title_link = card.select_one("a:has(h1, h2, h3)")
+        if title_link and title_link.get("href"):
+            href = urljoin(base_url, title_link["href"].strip())
+            if CompanyScraper._is_valid_job_url(href):
+                return href
 
         # No explicit apply link: any in-card link is the detail page.
         links = card.find_all("a", href=True)

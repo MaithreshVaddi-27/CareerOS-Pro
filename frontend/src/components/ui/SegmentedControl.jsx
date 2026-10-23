@@ -48,7 +48,9 @@ export default function SegmentedControl({ options, value, onChange, ariaLabel }
         <motion.button
           key={opt.value}
           ref={(el) => { refs.current[opt.value] = el; }}
+          type="button"
           role="radio"
+          name={ariaLabel}
           aria-checked={opt.value === value}
           onClick={() => onChange(opt.value)}
           className="segmented-option"
