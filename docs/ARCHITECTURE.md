@@ -178,6 +178,11 @@ discover_normalize_dedup_filter
         → END
 ```
 
+The graph's human-review interrupt is a workflow boundary, not an approval feature exposed
+by the HTTP API yet. `/jobs/match` returns ranked recommendations and evidence; it does not
+resume a paused run or record a human approval. Do not treat a match response as ready-to-apply
+approval.
+
 `CareerOSState` is a `TypedDict`:
 
 | Key | Type | Produced by |

@@ -100,8 +100,9 @@ source, it stays `unknown` — nothing is guessed to fill a gap.
 
 The whole match path is a [LangGraph](https://langchain-ai.github.io/langgraph/) state
 machine (`backend/graph.py`). It is **linear and unconditional** — the LLM never
-overrides a hard filter, and the graph pauses for human review before anything is marked
-ready-to-apply.
+overrides a hard filter. The graph has a human-review interrupt, but the HTTP API does
+not yet expose a resume/approval workflow; treat match results as recommendations, not
+as approved-to-apply postings.
 
 ---
 
@@ -518,17 +519,17 @@ Active development. An honest summary of where things stand:
 
 **Working and tested** — multi-source aggregation, deterministic normalization and
 dedup, SQL-side hard filtering over indexed columns, bounded candidate retrieval,
-hybrid ranking, grounded LLM explanation, career-page scraping, liveness verification,
-health and agent monitoring, CI.
+hybrid ranking, grounded LLM explanations with auditable evidence, career-page and job
+board scraping, liveness verification, health and agent monitoring, CI.
 
-**Known limitations** — `location` is matched with SQL `LIKE`, so short codes like
-`in` or `ny` can over-match in the database pass (`LIKE '%in%'` also hits "kingdom");
-the authoritative Python pass then rejects those rows, so results stay correct at a
-small cost in rows read. The vector store falls back to a local in-process
-implementation; the human-review interrupt is wired but the resume path is not yet
-exposed over HTTP. Inactive rows accumulate between retention runs. Timestamps are
-stored as naive `DateTime` in MySQL, so a deployment spanning a DST boundary can
-displace "posted within N days" by an hour.
+**Known limitations** — live source coverage depends on each provider and board being
+reachable and permitting automated requests; HTML-only scraping can miss client-rendered
+or paginated listings. Career boards may return 403/404/5xx or temporarily fail DNS, so
+scraping is best-effort rather than comprehensive. `location` uses SQL `LIKE` as a
+wider prefilter for short codes such as `in` and `ny`; the authoritative Python pass
+rejects over-matches. The vector store can use its local fallback, the human-review
+interrupt has no HTTP resume/approval endpoint yet, and inactive rows accumulate between
+retention runs.
 
 ---
 
